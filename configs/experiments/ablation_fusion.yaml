@@ -1,0 +1,98 @@
+# configs/experiments/ablation_fusion.yaml
+#
+# Fusion 策略 Ablation 實驗配置
+#
+# 對應手冊章節:
+# - §7.2 系統化 Ablation Study
+# - Tier 1: A1 Fusion 策略
+#
+# 實驗目標:
+# 比較不同融合策略對模型效能的影響:
+# 1. concat_only: 僅使用拼接
+# 2. hadamard: 拼接 + Hadamard 乘積
+# 3. hadamard_with_magnitude: 完整方案 B（推薦）
+
+defaults:
+  - /hardware/rtx5080_16gb
+
+# 覆寫實驗設定
+experiment:
+  name: "ablation_fusion"
+  tags: ["ablation", "fusion-strategy"]
+  notes: "比較 concat_only vs hadamard vs hadamard_with_magnitude"
+  seed: 42
+
+# 訓練設定（與 baseline 相同）
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  num_epochs: 20
+  warmup_epochs: 1
+  early_stopping_patience: 3
+
+# 固定其他參數
+model:
+  hash:
+    bits: 64
+
+knn:
+  K: 20
+
+# =========================================
+# 以下為 Ablation 變體配置
+# 透過 Hydra multirun 執行:
+#   python scripts/train.py --multirun \
+#     --config-name ablation_fusion \
+#     +ablation_variant=concat_only,hadamard,hadamard_with_magnitude
+# =========================================
+
+# 變體定義（需在命令行指定）
+ablation_variants:
+  concat_only:
+    # 僅拼接 [d_img, d_txt]
+    model:
+      fusion:
+        type: "concat_only"
+        mlp_dims: [1024, 512]
+        # 輸入維度: 768 * 2 = 1536
+    experiment:
+      name: "ablation_fusion_concat_only"
+      
+  hadamard:
+    # 拼接 + Hadamard [d_img, d_txt, d_img ⊙ d_txt]
+    model:
+      fusion:
+        type: "hadamard"
+        mlp_dims: [1024, 512]
+        # 輸入維度: 768 * 3 = 2304
+    experiment:
+      name: "ablation_fusion_hadamard"
+      
+  hadamard_with_magnitude:
+    # 完整方案 B（推薦）
+    # [d_img, d_txt, d_img ⊙ d_txt, m_img, m_txt]
+    model:
+      fusion:
+        type: "hadamard_with_magnitude"
+        mlp_dims: [1024, 512]
+        # 輸入維度: 768 * 3 + 2 = 2306
+    experiment:
+      name: "ablation_fusion_hadamard_magnitude"
+
+# =========================================
+# 手動執行各變體:
+# =========================================
+# 1. Concat only:
+#    python scripts/train.py --config-name ablation_fusion \
+#      model.fusion.type=concat_only \
+#      experiment.name=ablation_fusion_concat_only
+#
+# 2. Hadamard:
+#    python scripts/train.py --config-name ablation_fusion \
+#      model.fusion.type=hadamard \
+#      experiment.name=ablation_fusion_hadamard
+#
+# 3. Hadamard + Magnitude (完整):
+#    python scripts/train.py --config-name ablation_fusion \
+#      model.fusion.type=hadamard_with_magnitude \
+#      experiment.name=ablation_fusion_hadamard_magnitude

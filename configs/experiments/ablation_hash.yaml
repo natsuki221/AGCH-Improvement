@@ -1,0 +1,115 @@
+# configs/experiments/ablation_hash.yaml
+#
+# Hash Bits Ablation 實驗配置
+#
+# 對應手冊章節:
+# - §7.2 系統化 Ablation Study
+# - Tier 1: A2 Hash bits
+#
+# 實驗目標:
+# 比較不同 Hash 碼長度對模型效能與檢索效率的影響:
+# 1. 無 hash (直接使用融合向量): 作為上界參考
+# 2. 32 bits: 快速檢索，精度可能較低
+# 3. 64 bits: 平衡選擇（推薦）
+# 4. 128 bits: 高精度，檢索稍慢
+
+defaults:
+  - /hardware/rtx5080_16gb
+
+# 覆寫實驗設定
+experiment:
+  name: "ablation_hash"
+  tags: ["ablation", "hash-bits"]
+  notes: "比較不同 Hash 碼長度的效能"
+  seed: 42
+
+# 訓練設定
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  num_epochs: 20
+  warmup_epochs: 1
+  early_stopping_patience: 3
+
+# 固定融合策略為完整方案 B
+model:
+  fusion:
+    type: "hadamard_with_magnitude"
+    mlp_dims: [1024, 512]
+
+knn:
+  K: 20
+
+# =========================================
+# 以下為 Ablation 變體配置
+# =========================================
+
+ablation_variants:
+  no_hash:
+    # 無 hash 層（直接用融合向量分類）
+    # 作為上界參考，測試 hash 帶來的資訊壓縮損失
+    model:
+      hash:
+        bits: 512  # 與 fusion output 相同（實際上跳過 hash）
+        skip_hash: true  # 需要在 model.py 中支援
+    experiment:
+      name: "ablation_hash_none"
+      
+  bits_32:
+    # 32 bits hash
+    # 優點: 快速 Hamming distance 搜尋
+    # 缺點: 資訊壓縮可能過高
+    model:
+      hash:
+        bits: 32
+    experiment:
+      name: "ablation_hash_32"
+      
+  bits_64:
+    # 64 bits hash（預設、推薦）
+    # 平衡精度與效率
+    model:
+      hash:
+        bits: 64
+    experiment:
+      name: "ablation_hash_64"
+      
+  bits_128:
+    # 128 bits hash
+    # 優點: 更高的表達能力
+    # 缺點: 記憶體使用略增（約 50% 增加）
+    model:
+      hash:
+        bits: 128
+    checkpointing:
+      save_dir: "./outputs/checkpoints/ablation_hash_128"
+    experiment:
+      name: "ablation_hash_128"
+
+# =========================================
+# 手動執行各變體:
+# =========================================
+# 1. Hash 32 bits:
+#    python scripts/train.py --config-name ablation_hash \
+#      model.hash.bits=32 \
+#      experiment.name=ablation_hash_32
+#
+# 2. Hash 64 bits (baseline):
+#    python scripts/train.py --config-name ablation_hash \
+#      model.hash.bits=64 \
+#      experiment.name=ablation_hash_64
+#
+# 3. Hash 128 bits:
+#    python scripts/train.py --config-name ablation_hash \
+#      model.hash.bits=128 \
+#      experiment.name=ablation_hash_128
+
+# =========================================
+# 預期結果（假設性）:
+# =========================================
+# | Hash Bits | mAP (預估) | 索引大小 | 搜尋速度 |
+# |-----------|-----------|---------|---------|
+# | 32        | 0.68-0.70 | 小      | 最快    |
+# | 64        | 0.71-0.73 | 中      | 快      |
+# | 128       | 0.72-0.74 | 大      | 中      |
+# | 512 (無)  | 0.74-0.76 | 極大    | 慢      |
