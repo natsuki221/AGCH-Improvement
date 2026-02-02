@@ -1,0 +1,89 @@
+# configs/experiments/cv_experiment.yaml
+# 5-Fold Cross-Validation 實驗配置
+
+defaults:
+  - /hardware/rtx5080_16gb  # 繼承硬體配置
+
+# ==========================================
+# 實驗資訊
+# ==========================================
+experiment:
+  name: "cv_baseline"
+  tags: ["5-fold-cv", "siglip2-base", "hash-64", "knn-20"]
+  notes: "5-Fold Cross-Validation with optimized parameters"
+  seed: 42
+
+# ==========================================
+# K-Fold 配置 (⭐ 新增)
+# ==========================================
+k_fold:
+  enabled: true
+  num_folds: 5
+  current_fold: 0  # 會被 run_5fold_cv.sh 覆寫
+
+# ==========================================
+# 模型配置（繼承自 hardware）
+# ==========================================
+model:
+  siglip2_variant: "google/siglip2-base-patch16-256"
+  max_num_patches: 256
+  freeze_towers: true
+  
+  hash:
+    bits: 64
+
+# ==========================================
+# 訓練配置（⭐ CV 優化）
+# ==========================================
+training:
+  # 批次大小（維持）
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  effective_batch_size: 64
+  
+  # Epoch（⭐ 減少）
+  num_epochs: 20  # 從 30 降到 20
+  warmup_epochs: 1  # 從 2 降到 1
+  
+  # Early Stopping（⭐ 更激進）
+  early_stopping_patience: 3  # 從 5 降到 3
+  
+  # 驗證頻率
+  val_every_n_epochs: 1
+  
+  # 梯度管理
+  gradient_clip_norm: 1.0
+  
+  # 監控指標
+  monitor_metric: "val_mAP"
+
+# ==========================================
+# 檢查點（⭐ 精簡儲存）
+# ==========================================
+checkpointing:
+  save_dir: "./outputs/checkpoints"
+  save_every_n_epochs: 10  # 很少手動儲存
+  save_last: false  # 不儲存 last
+  save_top_k: 1  # ⭐ 只儲存最佳（節省空間）
+  save_optimizer: false  # ⭐ 不儲存 optimizer（節省 60% 空間）
+  filename_format: "best_model_mAP{val_mAP:.4f}.pth"
+
+# ==========================================
+# 日誌與監控
+# ==========================================
+logging:
+  log_every_n_steps: 100  # 減少日誌頻率
+  
+  use_wandb: true
+  wandb_project: "siglip2-5fold-cv"
+  wandb_entity: "natsuki221"
+  wandb_tags: ["cv", "fold"]  # 會自動加上 fold 編號
+  
+  use_tensorboard: true
+  tensorboard_dir: "./experiments/tensorboard"
+
+# ==========================================
+# 其他配置（繼承自 hardware）
+# ==========================================
+# optimizer, scheduler, dataloader, memory_optimization 等
+# 都繼承自 rtx5080_16gb.yaml

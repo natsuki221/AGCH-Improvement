@@ -1,0 +1,157 @@
+# configs/hardware/rtx5080_16gb.yaml
+
+# ==========================================
+# 硬體優化配置 - RTX 5080 16GB 專用
+# ==========================================
+
+experiment:
+  name: "baseline_rtx5080_16gb"
+  version: "v2.1"
+  seed: 42
+  deterministic: false  # true 會慢很多
+
+# 模型架構
+model:
+  siglip2_variant: "google/siglip2-base-patch16-256"  # ⚠️ 不要用 large！
+  max_num_patches: 256  # 保守設定，可嘗試 512 但需監控
+  text_max_length: 64
+  freeze_towers: true  # ⚠️ 必須為 true，否則 OOM！
+  
+  # 分解層
+  decomposer:
+    eps: 1.0e-6
+  
+  # 融合層
+  fusion:
+    type: "hadamard_with_magnitude"  # 方案 B
+    mlp_dims: [1024, 512]  # 輸入: 3*768+2 = 2306
+    dropout: 0.1
+    activation: "relu"
+  
+  # Hash 層
+  hash:
+    bits: 64  # 32=快速, 64=平衡, 128=高精度(需更多記憶體)
+    activation: "tanh"
+  
+  # 分類頭
+  classifier:
+    num_classes: 80  # COCO categories
+    use_bias: true
+
+# 損失函數
+loss:
+  # BCE Loss (主要)
+  bce_weight: 1.0
+  use_focal_loss: false  # 可選：處理類別不平衡
+  focal_alpha: 0.25
+  focal_gamma: 2.0
+  
+  # Cosine Alignment Loss
+  cosine_weight: 1.0  # α
+  
+  # Hash Regularization
+  hash_weight: 0.1  # γ
+  hash_reg:
+    lambda_balance: 0.1  # λ₁
+    lambda_decorr: 0.01  # λ₂
+
+# 訓練配置 (⭐ RTX 5080 優化)
+training:
+  # 批次大小 (關鍵！)
+  batch_size: 32  # ⚠️ 從 64 降到 32
+  gradient_accumulation_steps: 2  # ⚠️ 必須使用，模擬 batch_size=64
+  effective_batch_size: 64  # 32 * 2 = 64
+  
+  # Epoch 與驗證
+  num_epochs: 30
+  warmup_epochs: 2
+  val_every_n_epochs: 1
+  
+  # 梯度管理
+  gradient_clip_norm: 1.0
+  max_grad_norm: 1.0
+  
+  # Early Stopping
+  early_stopping_patience: 5
+  save_top_k: 3
+  monitor_metric: "val_mAP"  # 或 "val_f1_macro"
+
+# Optimizer
+optimizer:
+  type: "adamw"
+  lr: 2.0e-4  # ⚠️ 比原本 3e-4 略小（因 effective batch size 一樣）
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+# Scheduler
+scheduler:
+  type: "cosine_with_warmup"
+  warmup_ratio: 0.1  # warmup_epochs / num_epochs
+  min_lr: 1.0e-6
+  cosine_cycles: 1
+
+# DataLoader (⭐ 利用 32 核心 CPU)
+dataloader:
+  num_workers: 16  # ⚠️ 你有 32 核心，可以用更多
+  prefetch_factor: 3  # 預載入 3 批次資料
+  pin_memory: true  # 加速 CPU->GPU 傳輸
+  persistent_workers: true  # 保持 workers 存活
+  drop_last: true  # 丟棄不完整的最後一批
+
+# 記憶體優化 (⭐ 關鍵設定)
+memory_optimization:
+  # 混合精度 (必須！)
+  mixed_precision: true  # ⚠️ 節省 40% VRAM
+  amp_dtype: "float16"  # 或 "bfloat16" (如果支援)
+  
+  # Gradient Checkpointing (可選，節省更多記憶體)
+  gradient_checkpointing: false  # 凍結 towers 時不需要
+  
+  # 快取管理
+  empty_cache_steps: 100  # 每 100 步清理一次 CUDA 快取
+  
+  # VRAM 監控
+  log_gpu_memory: true
+  alert_vram_threshold_gb: 14.5  # 超過 14.5GB 發出警告
+
+# KNN 推論配置
+knn:
+  K: 20  # number of neighbors
+  distance_metric: "hamming"  # or "cosine"
+  voting_strategy: "softmax"  # or "uniform", "rank_based"
+  tau: 0.07  # temperature for softmax
+  top_n_tags: 5  # output top N predictions
+  
+  # 推論時的批次大小（可以比訓練大）
+  inference_batch_size: 64
+
+# 日誌與監控
+logging:
+  log_every_n_steps: 50
+  log_gradients: false  # 僅在 debug 時啟用
+  log_weights: false
+  
+  # Weights & Biases
+  use_wandb: true
+  wandb_project: "siglip2-multimodal-hash"
+  wandb_entity: "your-username"
+  
+  # TensorBoard
+  use_tensorboard: true
+  tensorboard_dir: "experiments/tensorboard"
+
+# 檢查點
+checkpointing:
+  save_dir: "experiments/checkpoints"
+  save_every_n_epochs: 5
+  save_last: true
+  save_top_k: 3
+  filename_format: "epoch={epoch:02d}-val_mAP={val_mAP:.4f}"
+
+# 資料增強 (可選)
+augmentation:
+  use_augmentation: false  # SigLIP2 已經很強，可能不需要
+  random_flip: false
+  color_jitter: false
+  random_crop: false

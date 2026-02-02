@@ -1,0 +1,25 @@
+# configs/experiments/baseline.yaml
+# Baseline 實驗配置
+
+defaults:
+  - /hardware/rtx5080_16gb  # 繼承硬體配置
+
+# 覆寫實驗名稱
+experiment:
+  name: "baseline_siglip2_base_hash64_knn20"
+  tags: ["baseline", "siglip2-base", "hash-64", "knn-20"]
+  notes: "Baseline experiment with direction+magnitude decomposition"
+
+# 確認關鍵參數
+model:
+  hash:
+    bits: 64  # Baseline 使用 64 bits
+
+knn:
+  K: 20  # Baseline 使用 20 neighbors
+
+# 訓練設定
+training:
+  num_epochs: 30
+  batch_size: 32
+  gradient_accumulation_steps: 2

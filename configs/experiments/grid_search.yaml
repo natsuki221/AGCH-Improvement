@@ -1,0 +1,21 @@
+# configs/grid_search.yaml
+
+grid_search:
+  # Tier 1: 核心架構
+  hash_bits: [32, 64, 128]
+  fusion_type: ["concat_only", "hadamard", "hadamard_with_magnitude"]
+  
+  # Tier 2: 訓練策略
+  cosine_weight: [0.5, 1.0, 2.0]
+  hash_weight: [0.05, 0.1, 0.2]
+  
+  # Tier 3: KNN 超參數
+  K_neighbors: [10, 20, 50]
+  tau: [0.03, 0.07, 0.15]
+  
+  # 記憶體相關（慎用）
+  max_num_patches: [256]  # 512 風險太高，不建議 grid search
+  batch_size: [32]  # 固定，不建議變動
+
+# 總實驗數：3*3 + 3*3 + 3*3 = 27 組
+# 預估時間：27 * 17.5 小時 = ~472 小時 (分散多 GPU 執行)
