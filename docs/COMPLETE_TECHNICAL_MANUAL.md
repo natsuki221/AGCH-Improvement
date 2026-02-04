@@ -4,13 +4,36 @@
 > **版本**: v3.0 (統整版 - 整合 v2.2 + v2.3)  
 > **日期**: 2026-02-02  
 > **專案**: AGCH-Improvement  
-> **硬體**: RTX 5080 16GB | 32-core CPU | 42GB RAM | **CUDA 12.4**  
-> **環境**: Python 3.11+ | PyTorch 2.6.0+cu124 | uv 套件管理  
+> **硬體**: RTX 5080 16GB | 32-core CPU | 42GB RAM | **CUDA 12.8**  
+> **環境**: Python 3.11+ | PyTorch 2.6.0+cu128 | uv 套件管理  
 > **目標**: 在 MS-COCO 資料集上實現高效能的圖文多標籤分類系統（含 5-Fold CV）
 
 ---
 
 ## 📋 更新日誌
+
+### v3.2 (2026-02-04) - 模組重構版
+
+- ✅ **模型載入修正**: 採用 `AutoModel` + `AutoImageProcessor` + `GemmaTokenizerFast` 分離載入
+  - 解決 `Siglip2Processor` tokenizer 映射 bug
+- ✅ **配置獨立化**: `cv_experiment.yaml` 不再依賴 `hardware` 繼承，完整獨立配置
+- ✅ **損失函數修正**: `compute_total_loss` 改為直接接收 `config.loss` 區塊
+- ✅ **環境驗證增強**: `verify_setup.py` 大幅擴充至 7 項檢查
+- ✅ **新增工具腳本**: `organize_checkpoints.py` 用於整理 checkpoint 目錄結構
+- ✅ **實驗報告文件**: 新增 `docs/EXPERIMENT_REPORT.md` 格式化實驗記錄
+
+### v3.1 (2026-02-03) - 評估指標擴充版
+
+- ✅ **新增評估指標**: 加入 11 個多標籤分類研究常用指標
+  - AUC-ROC (Macro/Micro)
+  - Precision & Recall (Macro/Micro)
+  - Hamming Loss
+  - Coverage Error, Ranking Loss, LRAP
+  - MAE (平均絕對誤差)
+- ✅ **Checkpoint 路徑修正**: 修復 5-Fold CV 的 checkpoint 儲存目錄問題
+  - 每個 fold 儲存到獨立目錄: `outputs/checkpoints/{exp_name}/best_model.pth`
+- ✅ **聚合腳本升級**: 支援所有新指標的統計與論文格式輸出
+- ✅ **wandb 記錄擴充**: 新增指標自動同步到 Weights & Biases
 
 ### v3.0 (2026-02-02) - 統整版
 - ✅ **文件整合**: 合併 v2.2 與 v2.3 的所有內容
@@ -91,7 +114,8 @@ AGCH-Improvement/
 │       └── karpathy_split.json # 待下載
 │
 ├── docs/                      # 專案文件
-│   └── COMPLETE_TECHNICAL_MANUAL.md # 本技術手冊
+│   ├── COMPLETE_TECHNICAL_MANUAL.md # 本技術手冊
+│   └── EXPERIMENT_REPORT.md         # 實驗報告
 │
 ├── experiments/               # 實驗記錄
 │   ├── baseline_rtx5080/     # 實驗輸出
@@ -114,10 +138,11 @@ AGCH-Improvement/
 │   ├── evaluate.py               # 模型評估
 │   ├── monitor_training.sh       # 訓練監控
 │   ├── run_5fold_cv.sh           # 執行 5-Fold CV
+│   ├── organize_checkpoints.py  # Checkpoint 整理工具
 │   ├── test_on_holdout.py        # Hold-out 測試
 │   ├── test_siglip2.py           # 模型測試
 │   ├── train.py                  # 主訓練腳本
-│   └── verify_setup.py           # 環境驗證
+│   └── verify_setup.py           # 環境驗證 (7 項檢查)
 │
 ├── src/                      # ✅ 核心原始碼 (完整)
 │   └── siglip2_multimodal_hash/
@@ -1082,21 +1107,26 @@ def hash_regularization(h, lambda_balance=0.1, lambda_decorr=0.01):
 class MultimodalHashKNN(nn.Module):
     def __init__(self, config):
         super().__init__()
-        # SigLIP2 encoders
-        self.processor = Siglip2Processor.from_pretrained(config.siglip2_variant)
-        self.model = Siglip2Model.from_pretrained(config.siglip2_variant)
+        # SigLIP2 encoders - 使用正確的載入方式
+        model_name = config.siglip2_variant
+        self.image_processor = AutoImageProcessor.from_pretrained(model_name, use_fast=False)
+        self.tokenizer = GemmaTokenizerFast.from_pretrained(model_name)
+        self.siglip_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         
         # ⚠️ 必須凍結 towers（RTX 5080 16GB 限制）
         if config.freeze_towers:
-            for param in self.model.parameters():
+            for param in self.siglip_model.parameters():
                 param.requires_grad = False
             print("✓ SigLIP2 towers frozen (saving ~7.5GB VRAM)")
         
+        # 獲取 embedding 維度
+        if hasattr(self.siglip_model.config, "projection_dim"):
+            self.embed_dim = self.siglip_model.config.projection_dim
+        else:
+            self.embed_dim = 768
+        
         # Decomposer
         self.decomposer = DirectionMagnitudeDecomposer()
-        
-        # Fusion
-        embed_dim = self.model.config.projection_dim  # 768 for base
         self.fusion = HadamardFusion(embed_dim, config.mlp_dims, config.dropout)
         
         # Hash layer
@@ -1107,9 +1137,11 @@ class MultimodalHashKNN(nn.Module):
         
         self.config = config
     
-    def forward(self, images, texts, return_components=False):
+    def forward(self, pixel_values, input_ids, attention_mask=None, return_components=False):
         # Encode
-        outputs = self.model(pixel_values=images, input_ids=texts)
+        outputs = self.siglip_model(
+            pixel_values=pixel_values, input_ids=input_ids, attention_mask=attention_mask
+        )
         v_img = outputs.image_embeds  # (B, D)
         v_txt = outputs.text_embeds   # (B, D)
         
@@ -1272,13 +1304,19 @@ def train_epoch(model, dataloader, optimizer, scheduler, config):
 ### 9.3 驗證迴圈
 
 ```python
+from sklearn.metrics import (
+    average_precision_score, f1_score, roc_auc_score,
+    precision_score, recall_score, hamming_loss,
+    coverage_error, label_ranking_loss, label_ranking_average_precision_score,
+)
+
 @torch.no_grad()
 def validate(model, dataloader, config):
-    """驗證迴圈"""
+    """驗證模型，計算多標籤分類常用指標"""
     model.eval()
     
     total_loss = 0
-    all_logits = []
+    all_preds = []
     all_labels = []
     
     for batch in dataloader:
@@ -1286,44 +1324,46 @@ def validate(model, dataloader, config):
         texts = batch['texts'].to('cuda', non_blocking=True)
         labels = batch['labels'].to('cuda', non_blocking=True)
         
-        # ⚠️ 混合精度推論
         with autocast(dtype=torch.float16):
             outputs = model(images, texts, return_components=True)
             logits = outputs['logits']
-            d_img = outputs['d_img']
-            d_txt = outputs['d_txt']
-            h = outputs['h']
+            d_img, d_txt, h = outputs['d_img'], outputs['d_txt'], outputs['h']
             
-            # 計算損失
             loss_bce = F.binary_cross_entropy_with_logits(logits, labels.float())
             loss_cos = 1 - F.cosine_similarity(d_img, d_txt, dim=1).mean()
             loss_hash = hash_regularization(h, config.loss.hash_reg.lambda_balance,
                                            config.loss.hash_reg.lambda_decorr)
-            
             loss = (config.loss.bce_weight * loss_bce + 
                     config.loss.cosine_weight * loss_cos + 
                     config.loss.hash_weight * loss_hash)
         
         total_loss += loss.item()
-        all_logits.append(logits.cpu())
-        all_labels.append(labels.cpu())
+        all_preds.append(torch.sigmoid(logits).cpu().numpy())
+        all_labels.append(labels.cpu().numpy())
     
-    # 合併所有結果
-    all_logits = torch.cat(all_logits, dim=0)
-    all_labels = torch.cat(all_labels, dim=0)
+    # 合併結果
+    all_preds = np.concatenate(all_preds, axis=0)
+    all_labels = np.concatenate(all_labels, axis=0)
+    pred_binary = (all_preds > 0.5).astype(int)
     
-    # 計算指標
-    from sklearn.metrics import average_precision_score, f1_score
-    
-    y_true = all_labels.numpy()
-    y_scores = torch.sigmoid(all_logits).numpy()
-    y_pred = (y_scores > 0.5).astype(int)
-    
+    # 計算所有指標
     metrics = {
         'loss': total_loss / len(dataloader),
-        'mAP': average_precision_score(y_true, y_scores, average='macro'),
-        'f1_micro': f1_score(y_true, y_pred, average='micro'),
-        'f1_macro': f1_score(y_true, y_pred, average='macro'),
+        # 主要指標
+        'mAP': average_precision_score(all_labels, all_preds, average='macro'),
+        'auc_macro': roc_auc_score(all_labels, all_preds, average='macro'),
+        'auc_micro': roc_auc_score(all_labels, all_preds, average='micro'),
+        # F1
+        'f1_micro': f1_score(all_labels, pred_binary, average='micro', zero_division=0),
+        'f1_macro': f1_score(all_labels, pred_binary, average='macro', zero_division=0),
+        # Precision & Recall
+        'precision_macro': precision_score(all_labels, pred_binary, average='macro', zero_division=0),
+        'recall_macro': recall_score(all_labels, pred_binary, average='macro', zero_division=0),
+        # 其他
+        'hamming_loss': hamming_loss(all_labels, pred_binary),
+        'ranking_loss': label_ranking_loss(all_labels, all_preds),
+        'lrap': label_ranking_average_precision_score(all_labels, all_preds),
+        'mae': np.mean(np.abs(all_preds - all_labels)),
     }
     
     return metrics
@@ -1868,23 +1908,27 @@ class MultimodalHashKNN(nn.Module):
     def __init__(self, config):
         super().__init__()
         
-        # SigLIP2 encoders
-        print(f"載入 SigLIP2 模型: {config.model.siglip2_variant}")
-        self.processor = Siglip2Processor.from_pretrained(
-            config.model.siglip2_variant
-        )
-        self.model = Siglip2Model.from_pretrained(
-            config.model.siglip2_variant
-        )
-        
+        # SigLIP2 encoders - 使用正確的載入方式
+        model_name = config.model.siglip2_variant
+        print(f"載入 SigLIP2 模型: {model_name}")
+        self.image_processor = AutoImageProcessor.from_pretrained(model_name, use_fast=False)
+        self.tokenizer = GemmaTokenizerFast.from_pretrained(model_name)
+        self.siglip_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        print(f"✓ SigLIP2 載入成功 (Model: {type(self.siglip_model).__name__})")
+
         # ⚠️ 必須凍結 towers（RTX 5080 16GB 限制）
         if config.model.freeze_towers:
-            for param in self.model.parameters():
+            for param in self.siglip_model.parameters():
                 param.requires_grad = False
             print("✓ SigLIP2 towers frozen (saving ~7.5GB VRAM)")
-        
+
         # 獲取 embedding 維度
-        self.embed_dim = self.model.config.projection_dim  # 768 for base
+        if hasattr(self.siglip_model.config, "projection_dim"):
+            self.embed_dim = self.siglip_model.config.projection_dim
+        elif hasattr(self.siglip_model.config, "text_config"):
+            self.embed_dim = self.siglip_model.config.text_config.hidden_size
+        else:
+            self.embed_dim = 768
         
         # Decomposer
         self.decomposer = DirectionMagnitudeDecomposer(
@@ -2213,11 +2257,7 @@ def hash_regularization(
     return loss_hash
 
 
-def compute_total_loss(
-    outputs: dict,
-    labels: torch.Tensor,
-    config
-) -> tuple[torch.Tensor, dict]:
+def compute_total_loss(outputs: dict, labels: torch.Tensor, config) -> dict:
     """
     計算總損失
     
@@ -2357,7 +2397,8 @@ def train_epoch(
             )
             
             # 計算損失
-            loss, loss_dict = compute_total_loss(outputs, labels, config)
+            loss_dict = compute_total_loss(outputs, labels, config.loss)
+            loss = loss_dict["total"]
             loss = loss / accumulation_steps  # 梯度累積
         
         # 反向傳播
@@ -2702,7 +2743,106 @@ class MemoryMonitor:
 
 ## 12. 評估指標
 
-（與 v2.1 相同，省略）
+本專案採用多標籤分類研究常用的評估指標，以對齊相關領域的學術標準。
+
+### 12.1 主要指標
+
+| 指標 | 說明 | 方向 |
+|------|------|------|
+| **mAP** | Mean Average Precision，各類別 AP 的平均值 | ↑ 越高越好 |
+| **AUC-ROC (Macro)** | ROC 曲線下面積，各類別平均 | ↑ 越高越好 |
+| **AUC-ROC (Micro)** | ROC 曲線下面積，全局平均 | ↑ 越高越好 |
+| **F1-Macro** | F1 分數，各類別平均 | ↑ 越高越好 |
+| **F1-Micro** | F1 分數，全局平均 | ↑ 越高越好 |
+
+### 12.2 Precision & Recall
+
+| 指標 | 說明 | 方向 |
+|------|------|------|
+| **Precision-Macro** | 精確率，各類別平均 | ↑ 越高越好 |
+| **Precision-Micro** | 精確率，全局平均 | ↑ 越高越好 |
+| **Recall-Macro** | 召回率，各類別平均 | ↑ 越高越好 |
+| **Recall-Micro** | 召回率，全局平均 | ↑ 越高越好 |
+
+### 12.3 Ranking 指標
+
+| 指標 | 說明 | 方向 |
+|------|------|------|
+| **LRAP** | Label Ranking Average Precision | ↑ 越高越好 |
+| **Ranking Loss** | 排序損失，平均排序錯誤率 | ↓ 越低越好 |
+| **Coverage Error** | 平均需要包含多少標籤才能涵蓋所有真實標籤 | ↓ 越低越好 |
+
+### 12.4 其他指標
+
+| 指標 | 說明 | 方向 |
+|------|------|------|
+| **Hamming Loss** | 漢明損失，預測錯誤的標籤比例 | ↓ 越低越好 |
+| **MAE** | Mean Absolute Error，預測機率與真實標籤的平均差距 | ↓ 越低越好 |
+
+### 12.5 計算實例
+
+```python
+from sklearn.metrics import (
+    average_precision_score,
+    f1_score,
+    roc_auc_score,
+    precision_score,
+    recall_score,
+    hamming_loss,
+    coverage_error,
+    label_ranking_loss,
+    label_ranking_average_precision_score,
+)
+import numpy as np
+
+def compute_all_metrics(y_true, y_pred_proba, threshold=0.5):
+    """
+    計算所有多標籤分類指標
+    
+    Args:
+        y_true: (N, C) 真實標籤 (binary)
+        y_pred_proba: (N, C) 預測機率
+        threshold: 二元化閾值
+    """
+    y_pred = (y_pred_proba > threshold).astype(int)
+    
+    metrics = {
+        # 主要指標
+        'mAP': average_precision_score(y_true, y_pred_proba, average='macro'),
+        'auc_macro': roc_auc_score(y_true, y_pred_proba, average='macro'),
+        'auc_micro': roc_auc_score(y_true, y_pred_proba, average='micro'),
+        
+        # F1
+        'f1_macro': f1_score(y_true, y_pred, average='macro', zero_division=0),
+        'f1_micro': f1_score(y_true, y_pred, average='micro', zero_division=0),
+        
+        # Precision & Recall
+        'precision_macro': precision_score(y_true, y_pred, average='macro', zero_division=0),
+        'recall_macro': recall_score(y_true, y_pred, average='macro', zero_division=0),
+        
+        # Ranking
+        'lrap': label_ranking_average_precision_score(y_true, y_pred_proba),
+        'ranking_loss': label_ranking_loss(y_true, y_pred_proba),
+        'coverage_error': coverage_error(y_true, y_pred_proba),
+        
+        # 其他
+        'hamming_loss': hamming_loss(y_true, y_pred),
+        'mae': np.mean(np.abs(y_pred_proba - y_true)),
+    }
+    return metrics
+```
+
+### 12.6 論文報告格式
+
+建議在論文中使用以下格式報告 5-Fold CV 結果：
+
+```
+mAP:        0.68 ± 0.01
+AUC-Macro:  0.72 ± 0.01  
+F1-Macro:   0.54 ± 0.02
+Precision:  0.65 ± 0.01
+Recall:     0.48 ± 0.02
+```
 
 ---
 
@@ -3215,6 +3355,7 @@ echo "✅ 5-Fold CV 完成！總耗時: $((DURATION/3600))h $((DURATION%3600/60)
 ```python
 #!/usr/bin/env python3
 # scripts/aggregate_cv_results.py
+# 聚合 5-Fold CV 結果，支援所有多標籤分類評估指標
 
 import argparse
 import glob
@@ -3222,6 +3363,18 @@ import torch
 import numpy as np
 from pathlib import Path
 import json
+import re
+
+# 追蹤的指標
+METRICS = {
+    "mAP": ("mAP (↑)", True),
+    "auc_macro": ("AUC-Macro (↑)", True),
+    "f1_macro": ("F1-Macro (↑)", True),
+    "precision_macro": ("Precision (↑)", True),
+    "recall_macro": ("Recall (↑)", True),
+    "hamming_loss": ("Hamming Loss (↓)", False),
+    "mae": ("MAE (↓)", False),
+}
 
 def main():
     parser = argparse.ArgumentParser()
@@ -3232,25 +3385,36 @@ def main():
     pattern = f"{args.results_dir}/{args.exp_prefix}*/*.pth"
     files = sorted(glob.glob(pattern))
     
-    scores = {}
-    for f in files:
-        ckpt = torch.load(f, map_location="cpu")
-        fold_name = Path(f).parent.name
-        val_mAP = ckpt.get('val_mAP')
-        
-        import re
-        match = re.search(r'fold(\d+)', fold_name)
-        if match and val_mAP:
-            fold_idx = int(match.group(1))
-            scores[fold_idx] = val_mAP
-            print(f" - Fold {fold_idx}: mAP = {val_mAP:.4f}")
+    metrics_by_fold = {m: {} for m in METRICS.keys()}
     
-    if scores:
-        values = list(scores.values())
-        print(f"\n🏆 5-Fold CV 最終結果")
-        print(f"Mean: {np.mean(values):.4f}")
-        print(f"Std:  {np.std(values, ddof=1):.4f}")
-        print(f"\n📝 論文格式: mAP = {np.mean(values):.2f} ± {np.std(values, ddof=1):.2f}")
+    for f in files:
+        ckpt = torch.load(f, map_location="cpu", weights_only=False)
+        fold_name = Path(f).parent.name
+        
+        # 取得完整指標（v3.1 格式）
+        val_metrics = ckpt.get('val_metrics', {'mAP': ckpt.get('val_mAP')})
+        
+        match = re.search(r'fold(\d+)', fold_name)
+        if match and val_metrics.get('mAP'):
+            fold_idx = int(match.group(1))
+            for m in METRICS.keys():
+                if m in val_metrics:
+                    metrics_by_fold[m][fold_idx] = val_metrics[m]
+            
+            print(f" - Fold {fold_idx}: mAP={val_metrics['mAP']:.4f}")
+    
+    # 計算統計量
+    print("\n" + "=" * 60)
+    print("🏆 5-Fold Cross-Validation 最終結果")
+    print("=" * 60)
+    
+    for m_key, (m_name, _) in METRICS.items():
+        values = list(metrics_by_fold[m_key].values())
+        if values:
+            mean, std = np.mean(values), np.std(values, ddof=1)
+            print(f"{m_name:<20} {mean:.4f} ± {std:.4f}")
+    
+    print("=" * 60)
 
 if __name__ == "__main__":
     main()

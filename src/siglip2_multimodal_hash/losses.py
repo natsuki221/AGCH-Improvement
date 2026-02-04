@@ -44,7 +44,7 @@ def compute_total_loss(outputs: dict, labels: torch.Tensor, config) -> tuple[tor
     Args:
         outputs: 模型輸出（包含 logits, h, d_img, d_txt 等）
         labels: (B, C) multi-hot labels
-        config: 配置物件
+        config: 配置物件（已經是 loss 區塊）
 
     Returns:
         total_loss: 總損失
@@ -64,26 +64,26 @@ def compute_total_loss(outputs: dict, labels: torch.Tensor, config) -> tuple[tor
     # 3. Hash Regularization
     loss_hash = hash_regularization(
         h,
-        lambda_balance=config.loss.hash_reg.lambda_balance,
-        lambda_decorr=config.loss.hash_reg.lambda_decorr,
+        lambda_balance=config.hash_reg.lambda_balance,
+        lambda_decorr=config.hash_reg.lambda_decorr,
     )
 
     # 組合總損失
     total_loss = (
-        config.loss.bce_weight * loss_bce
-        + config.loss.cosine_weight * loss_cos
-        + config.loss.hash_weight * loss_hash
+        config.bce_weight * loss_bce
+        + config.cosine_weight * loss_cos
+        + config.hash_weight * loss_hash
     )
 
     # 返回損失字典（用於 logging）
     loss_dict = {
-        "total": total_loss.item(),
-        "bce": loss_bce.item(),
-        "cos": loss_cos.item(),
-        "hash": loss_hash.item(),
+        "total": total_loss,
+        "bce": loss_bce,
+        "cos": loss_cos,
+        "hash": loss_hash,
     }
 
-    return total_loss, loss_dict
+    return loss_dict
 
 
 class FocalLoss(nn.Module):

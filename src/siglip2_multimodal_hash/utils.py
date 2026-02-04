@@ -24,14 +24,16 @@ def get_gpu_memory_info() -> Dict[str, float]:
         allocated = torch.cuda.memory_allocated() / 1e9
         reserved = torch.cuda.memory_reserved() / 1e9
         max_allocated = torch.cuda.max_memory_allocated() / 1e9
+        total = torch.cuda.get_device_properties(0).total_memory / 1e9
 
         return {
             "allocated_gb": allocated,
             "reserved_gb": reserved,
             "max_allocated_gb": max_allocated,
-            "free_gb": 16.0 - reserved,
+            "total_gb": total,
+            "free_gb": total - reserved,
         }
-    return {}
+    return {"allocated_gb": 0, "reserved_gb": 0, "max_allocated_gb": 0, "total_gb": 0, "free_gb": 0}
 
 
 class MemoryMonitor:

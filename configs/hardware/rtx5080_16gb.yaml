@@ -10,6 +10,12 @@ experiment:
   seed: 42
   deterministic: false  # true 會慢很多
 
+# 路徑配置
+paths:
+  data_root: "data/coco"  # COCO 資料集根目錄
+  output_dir: "experiments/outputs"
+  checkpoint_dir: "experiments/checkpoints"
+
 # 模型架構
 model:
   siglip2_variant: "google/siglip2-base-patch16-256"  # ⚠️ 不要用 large！

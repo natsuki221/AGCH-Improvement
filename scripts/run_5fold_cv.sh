@@ -5,7 +5,7 @@
 set -e  # 遇到錯誤立即停止
 
 EXP_NAME="siglip2_cv_run1"
-CONFIG_NAME="cv_experiment"
+CONFIG_NAME="experiments/cv_experiment"
 
 echo "========================================"
 echo "🚀 開始 5-Fold Cross-Validation: $EXP_NAME"
@@ -33,9 +33,8 @@ do
     # 呼叫訓練腳本，覆寫 fold 參數
     python scripts/train.py \
         --config-name $CONFIG_NAME \
-        experiment.name="${EXP_NAME}_fold${i}" \
-        k_fold.enabled=true \
-        k_fold.current_fold=$i
+        experiments.experiment.name="${EXP_NAME}_fold${i}" \
+        experiments.k_fold.current_fold=$i
     
     if [ $? -ne 0 ]; then
         echo "❌ Fold $i 訓練失敗！停止實驗。"

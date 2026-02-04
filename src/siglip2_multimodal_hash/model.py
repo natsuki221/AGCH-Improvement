@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-from transformers import Siglip2Model, Siglip2Processor
+from transformers import AutoModel, AutoImageProcessor, GemmaTokenizerFast
 from typing import Optional, Dict
 
 
@@ -95,41 +95,53 @@ class MultimodalHashKNN(nn.Module):
     def __init__(self, config):
         super().__init__()
 
-        # SigLIP2 encoders
-        print(f"載入 SigLIP2 模型: {config.model.siglip2_variant}")
-        self.processor = Siglip2Processor.from_pretrained(config.model.siglip2_variant)
-        self.model = Siglip2Model.from_pretrained(config.model.siglip2_variant)
+        model_name = config.siglip2_variant
+
+        # SigLIP2 encoders - 使用正確的載入方式
+        # 注意：Siglip2Processor 有 tokenizer 映射 bug，需分開載入
+        print(f"載入 SigLIP2 模型: {model_name}")
+        self.image_processor = AutoImageProcessor.from_pretrained(model_name, use_fast=False)
+        self.tokenizer = GemmaTokenizerFast.from_pretrained(model_name)
+        self.siglip_model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        print(f"✓ SigLIP2 載入成功 (Model: {type(self.siglip_model).__name__})")
 
         # ⚠️ 必須凍結 towers（RTX 5080 16GB 限制）
-        if config.model.freeze_towers:
-            for param in self.model.parameters():
+        if config.freeze_towers:
+            for param in self.siglip_model.parameters():
                 param.requires_grad = False
             print("✓ SigLIP2 towers frozen (saving ~7.5GB VRAM)")
 
         # 獲取 embedding 維度
-        self.embed_dim = self.model.config.projection_dim  # 768 for base
+        # SigLIP 模型的 projection_dim 可能在不同地方
+        if hasattr(self.siglip_model.config, "projection_dim"):
+            self.embed_dim = self.siglip_model.config.projection_dim
+        elif hasattr(self.siglip_model.config, "text_config"):
+            self.embed_dim = self.siglip_model.config.text_config.hidden_size
+        else:
+            self.embed_dim = 768  # fallback for siglip2-base
+        print(f"  Embedding dim: {self.embed_dim}")
 
         # Decomposer
-        self.decomposer = DirectionMagnitudeDecomposer(eps=config.model.decomposer.eps)
+        self.decomposer = DirectionMagnitudeDecomposer(eps=config.decomposer.eps)
 
         # Fusion
         self.fusion = HadamardFusion(
             embed_dim=self.embed_dim,
-            mlp_dims=config.model.fusion.mlp_dims,
-            dropout=config.model.fusion.dropout,
-            activation=config.model.fusion.activation,
+            mlp_dims=config.fusion.mlp_dims,
+            dropout=config.fusion.dropout,
+            activation=config.fusion.activation,
         )
 
         # Hash layer
         self.hash_layer = HashLayer(
-            input_dim=config.model.fusion.mlp_dims[-1], hash_bits=config.model.hash.bits
+            input_dim=config.fusion.mlp_dims[-1], hash_bits=config.hash.bits
         )
 
         # Classifier head (for training)
         self.classifier = nn.Linear(
-            config.model.hash.bits,
-            config.model.classifier.num_classes,
-            bias=config.model.classifier.use_bias,
+            config.hash.bits,
+            config.classifier.num_classes,
+            bias=config.classifier.use_bias,
         )
 
         self.config = config
@@ -152,7 +164,7 @@ class MultimodalHashKNN(nn.Module):
             logits or dict of components
         """
         # Encode
-        outputs = self.model(
+        outputs = self.siglip_model(
             pixel_values=pixel_values, input_ids=input_ids, attention_mask=attention_mask
         )
         v_img = outputs.image_embeds  # (B, D)
@@ -194,7 +206,7 @@ class MultimodalHashKNN(nn.Module):
         attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """For inference: return hash codes"""
-        outputs = self.model(
+        outputs = self.siglip_model(
             pixel_values=pixel_values, input_ids=input_ids, attention_mask=attention_mask
         )
         v_img = outputs.image_embeds

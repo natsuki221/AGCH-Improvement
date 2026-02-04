@@ -56,8 +56,12 @@ class COCOMultiLabelDataset(Dataset):
             )
         else:
             # 傳統模式（使用 Karpathy split）
-            self.image_ids = self._get_karpathy_image_ids()
-            print(f"✓ 傳統模式: 影像數={len(self.image_ids):,}")
+            # fold_split 也可用作一般 split 指定
+            karpathy_split = (
+                fold_split if fold_split in ["train", "val", "test", "restval"] else "train"
+            )
+            self.image_ids = self._get_karpathy_image_ids(karpathy_split)
+            print(f"✓ Karpathy 模式: Split={karpathy_split}, 影像數={len(self.image_ids):,}")
 
         print(f"✓ {self.num_classes} 個類別")
 
@@ -108,17 +112,24 @@ class COCOMultiLabelDataset(Dataset):
         image_ids = folds_data[fold_name][fold_split]
         return image_ids
 
-    def _get_karpathy_image_ids(self) -> list:
+    def _get_karpathy_image_ids(self, split: str = "train") -> list:
         """傳統 Karpathy split（用於對比實驗）"""
         karpathy_file = self.data_root / "karpathy_split.json"
 
         with open(karpathy_file) as f:
             data = json.load(f)
 
-        # 預設使用 train split
+        # 根據指定的 split 過濾
+        # Karpathy split 有: train, val, test, restval
         image_ids = []
         for item in data["images"]:
-            if item.get("split") == "train":
+            item_split = item.get("split", "")
+            # val 對應 Karpathy 的 val + restval
+            if split == "val" and item_split in ["val", "restval"]:
+                filename = item["filename"]
+                img_id = int(filename.split("_")[-1].split(".")[0])
+                image_ids.append(img_id)
+            elif item_split == split:
                 filename = item["filename"]
                 img_id = int(filename.split("_")[-1].split(".")[0])
                 image_ids.append(img_id)
@@ -165,7 +176,9 @@ class COCOMultiLabelDataset(Dataset):
         return {
             "pixel_values": inputs["pixel_values"].squeeze(0),
             "input_ids": inputs["input_ids"].squeeze(0),
-            "attention_mask": inputs["attention_mask"].squeeze(0),
+            "attention_mask": inputs.get(
+                "attention_mask", torch.ones_like(inputs["input_ids"])
+            ).squeeze(0),
             "labels": labels,
             "image_id": img_id,
             "caption": caption,
@@ -175,10 +188,37 @@ class COCOMultiLabelDataset(Dataset):
 def create_dataloader(config, split: str = "train", fold_idx: Optional[int] = None):
     """建立 DataLoader（支援 K-Fold）"""
     from torch.utils.data import DataLoader
-    from transformers import Siglip2Processor
+    from transformers import AutoImageProcessor, GemmaTokenizerFast
 
-    # 載入 processor
-    processor = Siglip2Processor.from_pretrained(config.model.siglip2_variant)
+    # 載入 processor（分開載入避開 Siglip2Processor bug）
+    model_name = config.model.siglip2_variant
+    image_processor = AutoImageProcessor.from_pretrained(model_name, use_fast=False)
+    tokenizer = GemmaTokenizerFast.from_pretrained(model_name)
+
+    # 組合成一個簡單的 processor wrapper
+    class ProcessorWrapper:
+        def __init__(self, image_processor, tokenizer):
+            self.image_processor = image_processor
+            self.tokenizer = tokenizer
+
+        def __call__(self, text=None, images=None, **kwargs):
+            result = {}
+            # 分離 image 和 text 的參數
+            return_tensors = kwargs.pop("return_tensors", "pt")
+
+            if images is not None:
+                result.update(self.image_processor(images=images, return_tensors=return_tensors))
+            if text is not None:
+                # text 相關的 kwargs: padding, max_length, truncation
+                text_kwargs = {
+                    k: v
+                    for k, v in kwargs.items()
+                    if k in ["padding", "max_length", "truncation", "add_special_tokens"]
+                }
+                result.update(self.tokenizer(text, return_tensors=return_tensors, **text_kwargs))
+            return result
+
+    processor = ProcessorWrapper(image_processor, tokenizer)
 
     # 檢查是否使用 K-Fold
     use_k_fold = config.get("k_fold", {}).get("enabled", False)

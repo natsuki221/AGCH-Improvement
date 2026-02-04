@@ -71,7 +71,7 @@ def parse_args():
 
 
 def evaluate_with_classifier(
-    model: MultimodalHashKNN, dataloader: DataLoader, config, threshold: float = 0.5
+    model: MultimodalHashKNN, dataloader: DataLoader, loss_config, threshold: float = 0.5
 ) -> dict:
     """
     使用分類器頭進行評估
@@ -102,9 +102,9 @@ def evaluate_with_classifier(
                     return_components=True,
                 )
 
-                loss, _ = compute_total_loss(outputs, labels, config)
+                loss_dict = compute_total_loss(outputs, labels, loss_config)
 
-            total_loss += loss.item()
+            total_loss += loss_dict["total"].item()
             all_logits.append(outputs["logits"].cpu())
             all_labels.append(labels.cpu())
 
@@ -257,7 +257,7 @@ def main():
 
     # 建立模型
     print("\n建立模型...")
-    model = MultimodalHashKNN(config).cuda()
+    model = MultimodalHashKNN(config.model).cuda()
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
@@ -268,7 +268,34 @@ def main():
 
     # 建立 DataLoader
     print(f"\n建立 DataLoader (split={args.split})...")
-    processor = Siglip2Processor.from_pretrained(config.model.siglip2_variant)
+
+    # 分開載入 processor 組件（避開 Siglip2Processor tokenizer bug）
+    from transformers import AutoImageProcessor, GemmaTokenizerFast
+
+    model_name = config.model.siglip2_variant
+    image_processor = AutoImageProcessor.from_pretrained(model_name, use_fast=False)
+    tokenizer = GemmaTokenizerFast.from_pretrained(model_name)
+
+    class ProcessorWrapper:
+        def __init__(self, image_processor, tokenizer):
+            self.image_processor = image_processor
+            self.tokenizer = tokenizer
+
+        def __call__(self, text=None, images=None, **kwargs):
+            result = {}
+            return_tensors = kwargs.pop("return_tensors", "pt")
+            if images is not None:
+                result.update(self.image_processor(images=images, return_tensors=return_tensors))
+            if text is not None:
+                text_kwargs = {
+                    k: v
+                    for k, v in kwargs.items()
+                    if k in ["padding", "max_length", "truncation", "add_special_tokens"]
+                }
+                result.update(self.tokenizer(text, return_tensors=return_tensors, **text_kwargs))
+            return result
+
+    processor = ProcessorWrapper(image_processor, tokenizer)
 
     use_k_fold = config.get("k_fold", {}).get("enabled", False) or args.fold_idx is not None
 
@@ -310,7 +337,7 @@ def main():
     else:
         # 分類器評估
         metrics = evaluate_with_classifier(
-            model=model, dataloader=dataloader, config=config, threshold=args.threshold
+            model=model, dataloader=dataloader, loss_config=config.loss, threshold=args.threshold
         )
         title = "分類器評估結果"
 
