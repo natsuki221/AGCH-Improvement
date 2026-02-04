@@ -158,7 +158,7 @@ AGCH-Improvement/
 │
 ├── .gitignore               # ✅ Git 設定
 ├── .venv/                   # ✅ 虛擬環境
-├── pyproject.toml           # ✅ 專案配置 (CUDA 12.4)
+├── pyproject.toml           # ✅ 專案配置 (CUDA 12.8 Nightly)
 ├── README.md                # ✅ 專案說明
 ├── requirements.txt         # ✅ 依賴清單
 └── uv.lock                  # ✅ 版本鎖定
@@ -209,7 +209,7 @@ python --version
 # Python 3.12.8 (你的 requirements.txt 顯示)
 
 torch --version
-# 2.6.0+cu124 (✅ 正確的 CUDA 12.4 版本)
+# 2.6.0+cu124 (✅ 正確的 CUDA 12.8 Nightly 版本)
 
 nvidia-smi
 # Driver: 580.126.09, CUDA: 13.0 (runtime 支援 12.4)
@@ -220,7 +220,7 @@ nvidia-smi
 你的 `pyproject.toml` 已正確配置：
 
 ```toml
-# ✅ 正確：CUDA 12.4 版本
+# ✅ 正確：CUDA 12.8 Nightly 版本
 [[tool.uv.index]]
 name = "pytorch-cu124"
 url = "https://download.pytorch.org/whl/cu124"
@@ -301,7 +301,7 @@ python scripts/verify_setup.py
 ✓ Python 3.12.8
 
 [2/5] 檢查 CUDA...
-✓ CUDA 12.4
+✓ CUDA 12.8 Nightly
   GPU: NVIDIA GeForce RTX 5080
   VRAM: 16.3 GB
 
@@ -1595,7 +1595,7 @@ hardware_info:
   gpu:
     model: "NVIDIA GeForce RTX 5080"
     vram_gb: 16
-    cuda_version: "12.4"  # ⚠️ 修正：你的系統是 CUDA 12.4
+    cuda_version: "12.4"  # ⚠️ 修正：你的系統是 CUDA 12.8 Nightly
     driver_version: "580.126.09"
     compute_capability: "8.9"
   
@@ -3003,7 +3003,7 @@ watch -n 1 nvidia-smi
 **基礎建設**
 - [x] 專案目錄結構建立
 - [x] `.gitignore` 設定
-- [x] `pyproject.toml` 配置（含 CUDA 12.4）
+- [x] `pyproject.toml` 配置（含 CUDA 12.8 Nightly）
 - [x] `requirements.txt` 生成
 - [x] `uv.lock` 依賴鎖定
 - [x] 虛擬環境設定 (`.venv/`)
@@ -3096,7 +3096,7 @@ python scripts/train.py
 
 ### ✅ 主要特點
 1. **完全匹配你的專案結構** - 所有路徑、檔案名稱都對應
-2. **CUDA 12.4 正確配置** - 不是 13.0
+2. **CUDA 12.8 Nightly 正確配置** - 不是 13.0
 3. **PyTorch 2.6.0+cu124** - 對應你的 pyproject.toml
 4. **RTX 5080 16GB 優化** - batch_size=32, 混合精度, 梯度累積
 5. **可立即使用的程式碼** - 所有腳本都是完整且可執行的
@@ -3493,7 +3493,7 @@ Validation Results (5-Fold CV):
 
 ### ✅ 主要特點
 1. **完全匹配你的專案結構** - 所有路徑、檔案名稱都對應
-2. **CUDA 12.4 正確配置** - 對應你的系統
+2. **CUDA 12.8 Nightly 正確配置** - 對應你的系統
 3. **PyTorch 2.6.0+cu124** - 對應你的 pyproject.toml
 4. **RTX 5080 16GB 優化** - batch_size=32, 混合精度, 梯度累積
 5. **5-Fold CV 支援** - 頂會標準的實驗設計

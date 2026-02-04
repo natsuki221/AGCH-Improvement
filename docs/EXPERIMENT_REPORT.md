@@ -8,6 +8,24 @@
 
 <!-- 新的實驗記錄請加在此處，使用 --- 分隔 -->
 
+### 實驗記錄 ID: 20260204-ENV-UPGRADE
+
+**日期**: 2026-02-04  
+**類別**: 基礎建設與環境設定  
+**變更摘要**: 升級開發環境以支援 RTX 5080 (Blackwell)。
+
+#### 1. 變更詳情
+
+- **CUDA 升級**: 從 CUDA 12.4 升級至 CUDA 12.8 Nightly。
+- **依賴項更新**: 更新 `torch`、`torchvision` 等核心庫至支援 CUDA 12.8 的 nightly 版本。
+- **專案配置**: 修改 `pyproject.toml` 與 `requirements.txt` 以使用最新的 PyTorch nightly index。
+- **Git 配置**: 將 `outputs/` 加入 `.gitignore`。
+
+#### 2. 驗證結果
+
+- **硬體相容性**: RTX 5080 運作正常，支援 sm_120 架構。
+- **安裝測試**: `uv pip install` 流程順暢。
+
 ### 實驗記錄 ID: 20260204-STABILIZE
 
 **日期**: 2026-02-04  

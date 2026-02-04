@@ -44,6 +44,7 @@ data/coco/
 *.tar.gz
 
 # Experiments
+outputs/
 experiments/*/
 outputs/checkpoints/
 *.pth
