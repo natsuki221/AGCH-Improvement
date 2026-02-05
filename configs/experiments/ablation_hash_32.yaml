@@ -1,0 +1,17 @@
+# configs/experiments/ablation_hash_32.yaml
+# AB-4: Hash Bits = 32 消融實驗
+
+defaults:
+  - cv_experiment
+
+model:
+  hash:
+    bits: 32
+
+experiment:
+  name: "ablation_hash_32"
+  tags: ["ablation", "hash-bits", "hash-32"]
+
+training:
+  num_epochs: 50
+  early_stopping_patience: 5

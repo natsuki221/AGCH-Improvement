@@ -1,0 +1,17 @@
+# configs/experiments/ablation_hash_128.yaml
+# AB-4: Hash Bits = 128 消融實驗
+
+defaults:
+  - cv_experiment
+
+model:
+  hash:
+    bits: 128
+
+experiment:
+  name: "ablation_hash_128"
+  tags: ["ablation", "hash-bits", "hash-128"]
+
+training:
+  num_epochs: 50
+  early_stopping_patience: 5
