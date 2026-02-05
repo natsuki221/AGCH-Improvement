@@ -12,6 +12,13 @@
 
 ## 📋 更新日誌
 
+### v3.3 (2026-02-05) - 改進實作啟動版
+
+- ✅ **Test Set 評估修正**: 完成 `test_on_holdout.py` 重構，支援完整 11 項指標與 `weights_only=False` 模型載入
+- ✅ **5-Fold 指標補完**: 手動提取並於 `EXPERIMENT_REPORT.md` 補全 5 折交叉驗證的 AUC/F1 等關鍵指標
+- ✅ **新增實作計畫**: 建立 `docs/IMPROVEMENT_IMPLEMENTATION_PLAN.md` 作為後續分析與優化導航
+- ✅ **專案清理**: 將舊版計畫書移至 `docs/old/`，保持文檔整潔
+
 ### v3.2 (2026-02-04) - 模組重構版
 
 - ✅ **模型載入修正**: 採用 `AutoModel` + `AutoImageProcessor` + `GemmaTokenizerFast` 分離載入
