@@ -62,7 +62,7 @@ echo ""
 echo "─────────────────────────────────────────"
 echo "📊 聚合實驗結果..."
 echo "─────────────────────────────────────────"
-python scripts/aggregate_cv_results.py --exp_prefix "${EXP_NAME}_fold"
+/home/ncu-caic/Documents/Coding/github.com/natsuki221/AGCH-Improvement/.venv/bin/python scripts/aggregate_cv_results.py --exp_prefix "${EXP_NAME}_fold"
 
 echo ""
 echo "========================================"
