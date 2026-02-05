@@ -74,18 +74,34 @@ class HadamardFusion(nn.Module):
 class HashLayer(nn.Module):
     """Hash 層"""
 
-    def __init__(self, input_dim: int, hash_bits: int):
+    def __init__(self, input_dim: int, hash_bits: int, skip_hash: bool = False):
         super().__init__()
-        self.fc = nn.Linear(input_dim, hash_bits)
+        self.skip_hash = skip_hash
         self.hash_bits = hash_bits
+        self.input_dim = input_dim
+
+        if skip_hash:
+            # 跳過 hash 壓縮，直接傳遞輸入
+            self.fc = nn.Identity()
+            self.output_dim = input_dim
+            print(f"  [HashLayer] skip_hash=True, output_dim={input_dim}")
+        else:
+            self.fc = nn.Linear(input_dim, hash_bits)
+            self.output_dim = hash_bits
+            print(f"  [HashLayer] hash_bits={hash_bits}")
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        """Returns soft hash codes in [-1, 1]"""
-        h = torch.tanh(self.fc(z))
-        return h
+        """Returns soft hash codes in [-1, 1] or raw z if skip_hash"""
+        if self.skip_hash:
+            return z
+        else:
+            h = torch.tanh(self.fc(z))
+            return h
 
     def binarize(self, h: torch.Tensor) -> torch.Tensor:
         """For inference: convert to hard binary {-1, 1}"""
+        if self.skip_hash:
+            return h  # 不做二值化
         return torch.sign(h)
 
 
@@ -133,13 +149,17 @@ class MultimodalHashKNN(nn.Module):
         )
 
         # Hash layer
+        skip_hash = config.hash.get("skip_hash", False)
         self.hash_layer = HashLayer(
-            input_dim=config.fusion.mlp_dims[-1], hash_bits=config.hash.bits
+            input_dim=config.fusion.mlp_dims[-1],
+            hash_bits=config.hash.bits,
+            skip_hash=skip_hash,
         )
 
         # Classifier head (for training)
+        # 使用 hash_layer.output_dim 以支援 skip_hash 模式
         self.classifier = nn.Linear(
-            config.hash.bits,
+            self.hash_layer.output_dim,
             config.classifier.num_classes,
             bias=config.classifier.use_bias,
         )

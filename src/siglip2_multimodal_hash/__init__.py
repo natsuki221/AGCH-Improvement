@@ -11,6 +11,8 @@ SigLIP2 Multimodal Hash 模組
 
 from .model import DirectionMagnitudeDecomposer, HadamardFusion, HashLayer, MultimodalHashKNN
 
+from .baseline_model import SigLIP2MLPBaseline
+
 from .dataset import COCOMultiLabelDataset, create_dataloader
 
 from .losses import hash_regularization, compute_total_loss, FocalLoss
@@ -25,6 +27,7 @@ __all__ = [
     "HadamardFusion",
     "HashLayer",
     "MultimodalHashKNN",
+    "SigLIP2MLPBaseline",  # Baseline 模型
     # 資料集
     "COCOMultiLabelDataset",
     "create_dataloader",

@@ -1,0 +1,100 @@
+# configs/experiments/siglip2_mlp_baseline.yaml
+# ==========================================
+# SigLIP2-MLP Baseline 實驗配置 (純 MLP，無改進)
+# 用於對比驗證改進方法 (MultimodalHashKNN) 的效果
+# ==========================================
+
+experiment:
+  name: "siglip2_mlp_baseline"
+  version: "v1.0"
+  seed: 42
+  deterministic: false
+
+# 路徑配置
+paths:
+  data_root: "data/coco"
+  output_dir: "outputs"
+  checkpoint_dir: "outputs/checkpoints"
+
+# 模型架構 (Baseline 簡化版)
+model:
+  siglip2_variant: "google/siglip2-base-patch16-256"
+  max_num_patches: 256
+  text_max_length: 64
+  freeze_towers: true  # ⚠️ 必須為 true，否則 OOM！
+  
+  # Baseline 特有參數
+  baseline_hidden_dim: 512  # MLP 隱藏層維度
+  baseline_dropout: 0.1
+  
+  # 分類頭 (與改進版相同)
+  classifier:
+    num_classes: 80  # COCO categories
+    use_bias: true
+
+# 損失函數 (Baseline 只有 BCE)
+loss:
+  bce_weight: 1.0
+  use_focal_loss: false
+
+# 訓練配置 (與改進版相同以確保公平對比)
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  effective_batch_size: 64
+  
+  num_epochs: 30
+  warmup_epochs: 2
+  val_every_n_epochs: 1
+  
+  gradient_clip_norm: 1.0
+  max_grad_norm: 1.0
+  
+  early_stopping_patience: 5
+  save_top_k: 3
+  monitor_metric: "val_mAP"
+
+# Optimizer
+optimizer:
+  type: "adamw"
+  lr: 2.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+  eps: 1.0e-8
+
+# Scheduler
+scheduler:
+  type: "cosine_with_warmup"
+  warmup_ratio: 0.1
+  min_lr: 1.0e-6
+  cosine_cycles: 1
+
+# DataLoader
+dataloader:
+  num_workers: 16
+  prefetch_factor: 3
+  pin_memory: true
+  persistent_workers: true
+  drop_last: true
+
+# 記憶體優化
+memory_optimization:
+  mixed_precision: true
+  amp_dtype: "float16"
+  gradient_checkpointing: false
+  empty_cache_steps: 100
+  log_gpu_memory: true
+  alert_vram_threshold_gb: 14.5
+
+# 日誌
+logging:
+  log_every_n_steps: 50
+  log_gradients: false
+  log_weights: false
+  
+  use_wandb: false  # 預設關閉，可手動開啟
+  wandb_project: "siglip2-multimodal-hash"
+  wandb_entity: "your-username"
+  
+  use_tensorboard: true
+  tensorboard_dir: "outputs/tensorboard"

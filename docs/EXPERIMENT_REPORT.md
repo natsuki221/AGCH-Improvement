@@ -8,6 +8,56 @@
 
 <!-- 新的實驗記錄請加在此處，使用 --- 分隔 -->
 
+### 實驗記錄 ID: 20260205-BASELINE-SIGLIP2-MLP
+
+**日期**: 2026-02-05  
+**類別**: Baseline 對比實驗  
+**變更摘要**: 完成 SigLIP2-MLP Baseline 實驗，建立改進版效能對比基準。
+
+#### 1. 實驗配置
+
+| 項目 | Baseline (MLP) | 改進版 (AGCH) |
+|:---|:---|:---|
+| **模型架構** | SigLIP2 + MLP 分類器 | SigLIP2 + AGCH (方向/幅度分解 + Hadamard 融合) |
+| **損失函數** | BCE only | BCE + Cosine + Hash 正則化 |
+| **KNN 推論** | ❌ 無 | ✅ 有 |
+| **Epochs** | 30 | 20 |
+| **Batch Size** | 32 × 2 = 64 | 32 × 2 = 64 |
+
+#### 2. 實驗結果：Baseline vs AGCH 改進版
+
+| 指標 | Baseline (MLP) | 改進版 (AGCH) | 差異 |
+|:---:|:---:|:---:|:---:|
+| **mAP** | **0.8384** | 0.6787 | **+0.1597 (+23.5%)** |
+| **AUC-Macro** | **0.9836** | 0.9613 | +0.0223 |
+| **F1-Macro** | **0.7701** | 0.5522 | +0.2179 |
+| **Precision-Macro** | **0.8890** | 0.7728 | +0.1162 |
+| **Recall-Macro** | **0.6972** | 0.4755 | +0.2217 |
+| **Hamming Loss** | **0.0129** | 0.0190 | -0.0061 (更低更好) |
+| **LRAP** | **0.9275** | 0.8476 | +0.0799 |
+
+> [!IMPORTANT]
+> **Baseline 在所有指標上都大幅超越 AGCH 改進版！**  
+> 這表示 AGCH 架構（方向/幅度分解 + Hash + KNN）在此設定下反而造成效能下降。
+
+#### 3. 分析與結論
+
+| 觀察 | 分析 |
+|:---|:---|
+| **Baseline mAP 高達 0.8384** | 簡單的 MLP concat 策略足以達到極高效能 |
+| **改進版 mAP 僅 0.6787** | Hash 層與 KNN 推論可能帶來資訊損失 |
+| **Baseline 用更多 Epochs (30 vs 20)** | 公平對比需統一 epochs 數量 |
+| **Recall 差距最大 (+0.22)** | 改進版可能過度 precision-oriented |
+
+#### 4. 後續建議
+
+1. **重新評估 AGCH 架構**: 考慮是否應繼續使用 Hash + KNN 策略
+2. **消融實驗**: 拆解各組件貢獻 (僅 Hash、僅 decomposition 等)
+3. **Hyperparameter 調整**: 嘗試不同 hash bits、loss 權重
+4. **統一 Epochs**: 以相同 epochs 進行公平對比
+
+---
+
 ### 實驗記錄 ID: 20260205-5FOLD-SIGLIP2
 
 **日期**: 2026-02-05  
@@ -95,3 +145,41 @@
 
 - **環境檢查**: `scripts/verify_setup.py` 通過所有項目。
 - **VRAM 使用**: 凍結 towers 後，Batch size 32 運作正常。
+
+---
+
+### 實驗記錄 ID: 20260206-AB-1-NO-HASH
+
+**日期**: 2026-02-06  
+**類別**: Ablation Study (AB-1)  
+**變更摘要**: 測試移除 Hash Layer 後的效能表現 (AB-1)。
+
+#### 1. 實驗配置
+- **模型**: SigLIP2 + Fusion (Hadamard + Magnitude)
+- **Hash Layer**: **❌ 移除 (Skip)**
+- **Epochs**: 20
+- **Batch Size**: 32 × 2 = 64
+
+#### 2. 實驗結果：No Hash vs Full AGCH
+
+| 指標 | No Hash (AB-1) | Full AGCH | 差異 |
+|:---:|:---:|:---:|:---:|
+| **mAP** | **0.8323** | 0.6787 | **+0.1536 (+22.6%)** |
+| **AUC-Macro** | **0.9834** | 0.9613 | +0.0221 |
+| **F1-Macro** | **0.7630** | 0.5522 | +0.2108 |
+| **Precision-Macro** | **0.8862** | 0.7728 | +0.1134 |
+| **Recall-Macro** | **0.6840** | 0.4755 | +0.2085 |
+| **Hamming Loss** | **0.0129** | 0.0190 | -0.0061 |
+| **LRAP** | **0.9274** | 0.8476 | +0.0798 |
+
+> [!CRITICAL]
+> **Hash Layer 是效能瓶頸的核心原因！**  
+> 移除 Hash Layer 後，模型效能 (0.8323) 立即恢復至接近 Baseline MLP (0.8384) 的水準。  
+> 這證明 **Direction/Magnitude 分解與 Hadamard Fusion 策略本身是有效的**，問題出在 Hash Layer 的資訊壓縮或損失函數設計上。
+
+#### 3. 結論與行動
+1.  **確認主因**: Hash Layer 造成了資訊的嚴重損失或梯度傳遞困難。
+2.  **Fusion 有效**: Hadamard + Magnitude Fusion (0.8323) 與 MLP Concat (0.8384) 表現相當，證實此種結構本身無害。
+3.  **下一步**: 
+    - 暫停 Hash 優化，先以 "No Hash" 架構進行其他改進 (如 Per-class 分析)。
+    - 或重新設計 Hash Layer (增加 bits 或改變約束 loss)。

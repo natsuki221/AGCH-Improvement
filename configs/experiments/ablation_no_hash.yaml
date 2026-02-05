@@ -1,0 +1,96 @@
+# configs/experiments/ablation_no_hash.yaml
+# AB-1: 無 Hash 層消融實驗
+
+defaults:
+  - /hardware/rtx5080_16gb
+
+experiment:
+  name: "ablation_no_hash"
+  tags: ["ablation", "no-hash"]
+  notes: "測試移除 Hash 層對效能的影響"
+  seed: 42
+  deterministic: false
+
+# 路徑配置
+paths:
+  data_root: "data/coco"
+  output_dir: "outputs"
+  checkpoint_dir: "outputs/checkpoints"
+
+# 模型架構
+model:
+  siglip2_variant: "google/siglip2-base-patch16-256"
+  max_num_patches: 256
+  text_max_length: 64
+  freeze_towers: true
+
+  decomposer:
+    eps: 1.0e-6
+
+  fusion:
+    type: "hadamard_with_magnitude"
+    mlp_dims: [1024, 512]
+    dropout: 0.1
+    activation: "relu"
+
+  hash:
+    bits: 64
+    skip_hash: true  # ⚠️ 關鍵：跳過 Hash 層
+
+  classifier:
+    num_classes: 80
+    use_bias: true
+
+# 損失函數
+loss:
+  bce_weight: 1.0
+  cosine_weight: 0.5
+  hash_weight: 0.1
+  hash_reg:
+    lambda_balance: 0.1
+    lambda_decorr: 0.01
+
+# 訓練配置
+training:
+  batch_size: 32
+  gradient_accumulation_steps: 2
+  num_epochs: 20
+  warmup_epochs: 1
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 5
+
+# Optimizer
+optimizer:
+  type: "adamw"
+  lr: 2.0e-4
+  weight_decay: 0.01
+  betas: [0.9, 0.999]
+
+# Scheduler
+scheduler:
+  type: "cosine_with_warmup"
+  warmup_ratio: 0.1
+  min_lr: 1.0e-6
+
+# 記憶體優化
+memory_optimization:
+  mixed_precision: true
+  amp_dtype: "float16"
+  gradient_checkpointing: false
+  empty_cache_steps: 100
+  log_gpu_memory: true
+
+# DataLoader
+dataloader:
+  num_workers: 16
+  prefetch_factor: 3
+  pin_memory: true
+  persistent_workers: true
+  drop_last: true
+
+# 日誌
+logging:
+  log_every_n_steps: 50
+  use_wandb: false
+  use_tensorboard: true
+  tensorboard_dir: "outputs/tensorboard"

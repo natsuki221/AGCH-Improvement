@@ -12,6 +12,13 @@
 
 ## 📋 更新日誌
 
+### v3.4 (2026-02-06) - 消融實驗實作版
+
+- ✅ **消融實驗架構**: 支援 `skip_hash` 參數與動態 classifier 維度調整
+- ✅ **實驗配置**: 新增 `ablation_no_hash.yaml` (AB-1) 與 `ablation_bce_only.yaml` (AB-3)
+- ✅ **自動化腳本**: 建立 `scripts/run_ablation.sh` 批次執行消融實驗
+- ✅ **Baseline 對比**: 完成 SigLIP2-MLP Baseline 實驗 (mAP 0.8384) 並寫入報告
+
 ### v3.3 (2026-02-05) - 改進實作啟動版
 
 - ✅ **Test Set 評估修正**: 完成 `test_on_holdout.py` 重構，支援完整 11 項指標與 `weights_only=False` 模型載入
@@ -90,6 +97,7 @@
 14. [參考文獻](#14-參考文獻)
 15. [附錄](#15-附錄)
 16. [五折交叉驗證 (5-Fold CV)](#16-五折交叉驗證-5-fold-cv)
+17. [消融實驗與 Hash+KNN 策略評估](#17-消融實驗與-hashknn-策略評估)
 
 ---
 
@@ -103,7 +111,8 @@ AGCH-Improvement/
 │   ├── experiments/           # 實驗參數
 │   │   ├── ablation_fusion.yaml
 │   │   ├── ablation_hash.yaml
-│   │   ├── baseline.yaml      # Baseline 實驗配置
+│   │   ├── baseline.yaml      # Baseline 實驗配置（改進版）
+│   │   ├── siglip2_mlp_baseline.yaml  # 純 MLP Baseline 配置
 │   │   ├── cv_experiment.yaml # 5-Fold CV 實驗配置
 │   │   └── grid_search.yaml
 │   └── hardware/              # 硬體資源配置
@@ -148,16 +157,18 @@ AGCH-Improvement/
 │   ├── organize_checkpoints.py  # Checkpoint 整理工具
 │   ├── test_on_holdout.py        # Hold-out 測試
 │   ├── test_siglip2.py           # 模型測試
-│   ├── train.py                  # 主訓練腳本
+│   ├── train.py                  # 主訓練腳本（改進版）
+│   ├── train_baseline.py         # Baseline 訓練腳本（純 MLP）
 │   └── verify_setup.py           # 環境驗證 (7 項檢查)
 │
 ├── src/                      # ✅ 核心原始碼 (完整)
 │   └── siglip2_multimodal_hash/
 │       ├── __init__.py
+│       ├── baseline_model.py # SigLIP2-MLP Baseline 模型
 │       ├── dataset.py        # 資料載入器
 │       ├── knn.py            # KNN 檢索模組
 │       ├── losses.py         # 損失函數 (BCE+Cos+Hash)
-│       ├── model.py          # SigLIP2+Hash 模型架構
+│       ├── model.py          # SigLIP2+Hash 模型架構（改進版）
 │       └── utils.py          # 工具函數
 │
 ├── utils/                    # 通用工具
@@ -1071,18 +1082,29 @@ class HadamardFusion(nn.Module):
 
 ```python
 class HashLayer(nn.Module):
-    def __init__(self, input_dim, hash_bits):
+    def __init__(self, input_dim, hash_bits, skip_hash=False):
         super().__init__()
-        self.fc = nn.Linear(input_dim, hash_bits)
-        self.hash_bits = hash_bits
+        self.skip_hash = skip_hash
+        
+        if self.skip_hash:
+            self.fc = nn.Identity()
+            self.output_dim = input_dim
+        else:
+            self.fc = nn.Linear(input_dim, hash_bits)
+            self.output_dim = hash_bits
     
     def forward(self, z):
-        """Returns soft hash codes in [-1, 1]"""
+        """Returns soft hash codes in [-1, 1] OR raw z if skip_hash"""
+        if self.skip_hash:
+            return z
+        
         h = torch.tanh(self.fc(z))
         return h
     
     def binarize(self, h):
         """For inference: convert to hard binary {-1, 1}"""
+        if self.skip_hash:
+            return h
         return torch.sign(h)
 
 def hash_regularization(h, lambda_balance=0.1, lambda_decorr=0.01):
@@ -1137,10 +1159,11 @@ class MultimodalHashKNN(nn.Module):
         self.fusion = HadamardFusion(embed_dim, config.mlp_dims, config.dropout)
         
         # Hash layer
-        self.hash_layer = HashLayer(config.mlp_dims[-1], config.hash_bits)
+        skip_hash = config.get("skip_hash", False)
+        self.hash_layer = HashLayer(config.mlp_dims[-1], config.hash_bits, skip_hash=skip_hash)
         
-        # Classifier head (for training)
-        self.classifier = nn.Linear(config.hash_bits, config.num_classes)
+        # Classifier head (for training) - 使用 output_dim 適應 skip_hash
+        self.classifier = nn.Linear(self.hash_layer.output_dim, config.num_classes)
         
         self.config = config
     
@@ -3494,26 +3517,67 @@ Validation Results (5-Fold CV):
 
 ---
 
-## 結語
+## 17. 消融實驗與 Hash+KNN 策略評估
 
-本實驗計畫已完全針對 **AGCH-Improvement 專案**進行優化：
+### 17.1 背景與動機
 
-### ✅ 主要特點
-1. **完全匹配你的專案結構** - 所有路徑、檔案名稱都對應
-2. **CUDA 12.8 Nightly 正確配置** - 對應你的系統
-3. **PyTorch 2.6.0+cu124** - 對應你的 pyproject.toml
-4. **RTX 5080 16GB 優化** - batch_size=32, 混合精度, 梯度累積
-5. **5-Fold CV 支援** - 頂會標準的實驗設計
+在 v3.4 之前的實驗中，我們觀察到 SigLIP2-MLP Baseline (mAP 0.8384) 顯著優於 AGCH 改進版 (mAP 0.6787)。這表明 AGCH 架構中的某些組件（Direction/Magnitude 分解、Hadamard 融合、Hash 層、KNN 推論）可能不僅未能提升效能，反而造成了資訊損失。
 
-### 📊 預期效能
-- 單次訓練: ~17.5 小時
-- 5-Fold CV: ~20-26 小時
-- VRAM 使用: **~10.2 GB / 16 GB**
+為了釐清各組件的貢獻並決定是否繼續採用本策略，我們設計了一系列系統化的消融實驗。
 
-### 🎯 立即開始
-1. 升級 FAISS 到 GPU 版本
-2. 建立資料集索引
-3. 生成 5-Fold 切分
-4. 執行訓練
+### 17.2 消融實驗設計
 
-祝實驗順利！🚀
+#### 17.2.1 AB-1: 無 Hash 層效能評估
+
+- **目標**: 評估將高維特徵壓縮至 binary hash codes 所造成的效能損失。
+- **設定**: 移除 Hash Layer，直接使用 Fusion 層輸出的高維浮點數向量進行分類。
+- **配置**: `configs/experiments/ablation_no_hash.yaml`
+- **關鍵參數**: `model.hash.skip_hash=true`
+
+#### 17.2.2 AB-2: 無分解 (Decomposition) 評估
+
+- **目標**: 評估將 Embedding 分解為方向與幅度的策略是否有效。
+- **設定**: 移除 DirectionMagnitudeDecomposer，直接將 SigLIP2 的原始 Embedding 拼接送入分類器。
+- **預期**: 若效能提升，表示分解過程破壞了原始語義空間的完整性。
+
+#### 17.2.3 AB-3: 僅 BCE Loss 評估
+
+- **目標**: 測試額外的 Cosine Alignment Loss 與 Hash Regularization Loss 是否干擾了主任務學習。
+- **設定**: 將 `cosine_weight` 與 `hash_weight` 設為 0，僅保留 Binary Cross-Entropy Loss。
+- **配置**: `configs/experiments/ablation_bce_only.yaml`
+
+#### 17.2.4 AB-4: Hash Bits 長度評估
+
+- **目標**: 尋找資訊壓縮與檢索效率的最佳平衡點。
+- **變體**: 32 bits, 64 bits (Baseline), 128 bits, 256 bits。
+- **分析**: 隨著 bits 增加，mAP 應上升，但檢索速度下降且儲存空間增加。
+
+### 17.3 執行指南
+
+使用自動化腳本批次執行所有消融實驗：
+
+```bash
+# 執行所有消融實驗 (AB-1, AB-3, AB-4)
+./scripts/run_ablation.sh
+```
+
+或單獨執行特定實驗：
+
+```bash
+# 執行 AB-1 (無 Hash)
+python scripts/train.py --config-name experiments/ablation_no_hash
+
+# 執行 AB-3 (僅 BCE)
+python scripts/train.py --config-name experiments/ablation_bce_only
+```
+
+### 17.4 預期決策路徑
+
+實驗結果將決定後續優化方向：
+
+| 觀察結果 | 潛在含義 | 建議行動 |
+|:---|:---|:---|
+| **移除 Hash 層後 mAP 大幅回升** | Hash 壓縮造成主要瓶頸 | 放棄 Hash+KNN，改用純向量檢索或傳統分類 |
+| **移除分解後效能提升** | 分解策略不適合 SigLIP2 | 回歸標準 Embedding 拼接策略 |
+| **僅用 BCE 效果最佳** | 多工 Loss 導致優化衝突 | 簡化 Loss Function，專注於分類準確度 |
+| **增加 Bits 顯著提升 mAP** | 目前 64 bits 容量不足 | 增加 Hash Bits 至 128 或 256 |
