@@ -1,4 +1,5 @@
 # 多模態圖文多標籤分類：五折交叉驗證完整實驗計畫
+
 # SigLIP 2 + 方向/幅度分解 + Hadamard 融合 + Hash + KNN (5-Fold CV)
 
 > **版本**: v2.3 (5-Fold Cross-Validation 特別版)  
@@ -14,6 +15,7 @@
 ## 📋 更新日誌 (v2.3)
 
 ### 五折交叉驗證的核心變更
+
 - ✅ **採用 5-Fold CV**: 提升實驗可信度與論文說服力
 - ✅ **嚴格資料隔離**: Karpathy Test Set 完全不碰，僅用於最終評估
 - ✅ **Dev Pool 設計**: train + restval + val 合併（~118,287 張）
@@ -22,6 +24,7 @@
 - ✅ **結果聚合**: 提供 Mean ± Std 的標準學術報告
 
 ### 硬體優化（繼承 v2.2）
+
 - ✅ Batch size: 32（梯度累積 2 步）
 - ✅ 混合精度: 必須啟用
 - ✅ 記憶體監控: 實時追蹤
@@ -30,6 +33,7 @@
 ---
 
 ## 目錄
+
 1. [核心目標與動機](#1-核心目標與動機)
 2. [資料切分策略（黃金法則）](#2-資料切分策略黃金法則)
 3. [實驗數據分布](#3-實驗數據分布)
@@ -58,7 +62,7 @@
 ### 1.2 與單次訓練的對比
 
 | 指標 | 單次訓練 (v2.2) | 五折交叉驗證 (v2.3) |
-|------|----------------|---------------------|
+| ------ | ---------------- | --------------------- |
 | **訓練次數** | 1 次 | 5 次 |
 | **總時長** | ~17.5 小時 | **~87.5 小時（3.6 天）** |
 | **結果形式** | mAP: 0.72 | **mAP: 0.72 ± 0.03** |
@@ -74,7 +78,7 @@
 
 **這是最重要的原則！** 我們必須嚴格遵守以下切分邏輯，確保與現有文獻（如 CLIP, SigLIP, BLIP）的可比性：
 
-```
+```plaintext
 原始 COCO 2014 資料集
 ├── train2014: 82,783 張
 └── val2014: 40,504 張
@@ -89,7 +93,7 @@
 
 ### 2.2 五折切分邏輯
 
-```
+```plaintext
 Step 1: 鎖定 Test Set
 ────────────────────────────────────────
 Karpathy Test (5,000 張) → 完全隔離
@@ -170,7 +174,7 @@ flowchart TD
 ### 3.1 完整數據統計表
 
 | 數據集類型 | 來源組成 | 影像數量（約） | 角色 |
-|-----------|---------|--------------|------|
+| ----------- | --------- | -------------- | ------ |
 | **Total Pool** | Train2014 + Val2014 | 123,287 | 原始總量 |
 | **Test Set (Hold-out)** | Karpathy Test | **5,000** | **最終評估（不可動）** |
 | **Dev Pool** | Karpathy Train + Val | **~118,287** | 用於 CV 切分 |
@@ -180,12 +184,13 @@ flowchart TD
 ### 3.2 每折的訓練量對比
 
 | 設定 | 訓練影像數 | 驗證影像數 | 訓練/驗證比例 |
-|------|-----------|-----------|--------------|
+| ------ | ----------- | ----------- | -------------- |
 | **原計畫（v2.2）** | 82,783 | 40,504 | 2.0:1 |
 | **五折 CV（v2.3）** | **94,630** | **23,657** | **4.0:1** |
 | **變化** | +14% | -42% | +100% |
 
 **關鍵洞察**:
+
 - 訓練資料增加 14%，每個 epoch 的迭代次數會增加
 - 驗證資料減少 42%，驗證速度更快
 - 因此可以降低 epochs（30→20）同時保持收斂品質
@@ -260,7 +265,7 @@ scripts/
 由於訓練量變為原本的 5 倍，且單次訓練資料量增加（82k → 94k），必須進行激進的時間管理。
 
 | 參數 | 原計畫 (v2.2) | **CV 優化版 (v2.3)** | 原因 |
-|------|--------------|---------------------|------|
+| ------ | -------------- | --------------------- | ------ |
 | **Batch Size** | 32 (Acc=2) | **32 (Acc=2)** | 維持記憶體安全邊界 |
 | **Epochs** | 30 | **20** | 資料量變大（94k），每 Epoch 迭代次數增加，可提早收斂 |
 | **Early Stopping** | Patience = 5 | **Patience = 3** | 節省無效運算時間 |
@@ -334,6 +339,7 @@ TensorBoard 日誌: ~0.2 GB
 ### 5.4 儲存策略
 
 **推薦配置**（節省空間）:
+
 ```python
 # 在 checkpoint 儲存時
 checkpoint = {
@@ -1408,6 +1414,7 @@ performance.
 ### 9.4 WandB 視覺化
 
 你將在 WandB 上看到：
+
 - 5 條重疊的 Loss/mAP 曲線
 - 可以比較不同 Fold 的收斂速度
 - 檢查是否有過擬合現象
@@ -1421,6 +1428,7 @@ performance.
 #### 錯誤 1: KeyError: 'fold_0'
 
 **症狀**:
+
 ```
 KeyError: 'fold_0'
 ```
@@ -1428,6 +1436,7 @@ KeyError: 'fold_0'
 **原因**: 未生成 `5fold_split.json`
 
 **解決**:
+
 ```bash
 python scripts/create_kfold_split.py
 ```
@@ -1437,6 +1446,7 @@ python scripts/create_kfold_split.py
 #### 錯誤 2: FileNotFoundError: 影像不存在
 
 **症狀**:
+
 ```
 FileNotFoundError: data/coco/images/train2014/COCO_train2014_000000123456.jpg
 ```
@@ -1444,8 +1454,10 @@ FileNotFoundError: data/coco/images/train2014/COCO_train2014_000000123456.jpg
 **原因**: Dataset 讀取了不存在的影像（可能是 Karpathy split 與實際資料不匹配）
 
 **解決**:
+
 1. 檢查 Karpathy split 版本是否正確
 2. 確認所有影像都已下載
+
 ```bash
 # 驗證影像完整性
 python scripts/verify_setup.py
@@ -1456,6 +1468,7 @@ python scripts/verify_setup.py
 #### 錯誤 3: OOM (Out of Memory)
 
 **症狀**:
+
 ```
 RuntimeError: CUDA out of memory. Tried to allocate 2.50 GiB
 ```
@@ -1463,6 +1476,7 @@ RuntimeError: CUDA out of memory. Tried to allocate 2.50 GiB
 **原因**: 記憶體超過 16 GB
 
 **解決**（依序嘗試）:
+
 ```bash
 # 1. 降低 batch size
 # 在 cv_experiment.yaml 中:
@@ -1486,6 +1500,7 @@ memory_optimization:
 **症狀**: 每個 epoch 超過 20 分鐘
 
 **排查**:
+
 ```python
 # 檢查 DataLoader 瓶頸
 import time
@@ -1501,6 +1516,7 @@ print(f"前 10 批次耗時: {elapsed:.2f}s")
 ```
 
 **解決**:
+
 ```yaml
 # 增加 workers
 dataloader:
@@ -1513,11 +1529,13 @@ dataloader:
 #### 錯誤 5: WandB 登入失敗
 
 **症狀**:
+
 ```
 wandb: ERROR Unable to authenticate
 ```
 
 **解決**:
+
 ```bash
 # 重新登入
 wandb login
@@ -1614,7 +1632,7 @@ python scripts/test_on_holdout.py \
 ### 附錄 C: 文獻對比表
 
 | 方法 | Validation | Test mAP | 備註 |
-|------|-----------|----------|------|
+| ------ | ----------- | ---------- | ------ |
 | CLIP-ViT-B/32 | Single split | 0.65 | 單次實驗 |
 | SigLIP-So400m | Single split | 0.68 | 單次實驗 |
 | **Ours (單次)** | Single split | **0.72** | v2.2 baseline |
@@ -1629,6 +1647,7 @@ python scripts/test_on_holdout.py \
 本實驗計畫將你的研究提升到學術論文的標準水平：
 
 ### ✅ 主要成就
+
 1. **嚴格的實驗設計**: 五折交叉驗證 + Hold-out Test Set
 2. **完全自動化**: Shell Script 控制整個流程
 3. **硬體優化**: 針對 RTX 5080 16GB 的精細調整
@@ -1636,12 +1655,14 @@ python scripts/test_on_holdout.py \
 5. **論文就緒**: 提供標準的 Mean ± Std 報告
 
 ### 📊 預期貢獻
+
 - **實驗可信度**: ⭐⭐⭐⭐⭐（頂會標準）
 - **數據利用率**: 100%（除 Test Set 外）
 - **過擬合檢測**: 通過方差分析
 - **論文價值**: 高（可直接用於投稿）
 
 ### 🚀 下一步
+
 1. 執行檢核點（確保所有準備工作完成）
 2. 啟動 `run_5fold_cv.sh`
 3. 監控訓練進度

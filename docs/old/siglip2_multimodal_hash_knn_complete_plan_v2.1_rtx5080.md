@@ -1,4 +1,5 @@
 # 多模態圖文多標籤分類完整實驗計畫
+
 # SigLIP 2 + 方向/幅度分解 + Hadamard 融合 + Hash + KNN
 
 > **版本**: v2.1 (RTX 5080 16GB 優化版)  
@@ -11,6 +12,7 @@
 ## 📋 更新日誌 (v2.1)
 
 ### 針對 RTX 5080 16GB 的主要優化
+
 - ✅ Batch size: 64 → **32** (配合梯度累積模擬 batch 64)
 - ✅ 混合精度訓練: 建議 → **必須啟用** (節省 40% VRAM)
 - ✅ 梯度累積: 可選 → **必須使用** (2-4 步)
@@ -23,6 +25,7 @@
 ---
 
 ## 目錄
+
 1. [問題定義與核心思想](#1-問題定義與核心思想)
 2. [資料集協議](#2-資料集協議)
 3. [模型架構](#3-模型架構)
@@ -42,11 +45,13 @@
 ## 1) 問題定義與核心思想
 
 ### 1.1 任務定義
+
 - **輸入**: 圖片 `image` + 對應文字敘述 `caption`
 - **輸出**: `C` 個 tags 的 multi-hot 向量 $y \in \{0,1\}^C$
 - **資料集**: MS-COCO (80 個物件類別)
 
 ### 1.2 核心創新點
+
 本研究提出一個結合監督式學習與近鄰檢索的混合架構：
 
 1. **方向/幅度分解 (方案 B)**
@@ -66,6 +71,7 @@
    - 提供可解釋性（可視覺化鄰居樣本）
 
 ### 1.3 方法優勢
+
 - **可擴展性**: Hash 層支援百萬級資料庫檢索
 - **可解釋性**: KNN 提供視覺化解釋路徑
 - **靈活性**: 可動態新增類別（更新 index）而無需重新訓練分類器
@@ -75,18 +81,20 @@
 ## 2) 資料集協議
 
 ### 2.1 MS-COCO 基本資訊
+
 - **版本**: COCO 2014 (train2014 + val2014)
-- **影像數量**: 
+- **影像數量**:
   - 訓練集: ~82,783 張
   - 驗證集: ~40,504 張
 - **物件類別**: 80 個 (detection annotations)
 - **Captions**: 每張圖片有 5 個人工標註的 captions
 
 ### 2.2 實驗切分協議
+
 採用 **Karpathy split**（影像檢索與 captioning 社群標準）：
 
 | Split | 影像數量 | 用途 |
-|-------|---------|------|
+| ------- | --------- | ------ |
 | Train | 113,287 | 模型訓練 |
 | Val | 5,000 | 超參數調整、early stopping |
 | Test | 5,000 | 最終評估 |
@@ -94,16 +102,19 @@
 **註**: Karpathy split 重新組織了 COCO 2014 train/val，更適合 caption-image 配對任務。
 
 ### 2.3 標籤定義
+
 - **Tag 來源**: 使用 COCO instance annotations 中的 80 個物件類別
 - **標籤格式**: Multi-hot vector $y \in \{0,1\}^{80}$
 - **正樣本定義**: 若影像中出現該物件類別（不限 instance 數量）
 
 ### 2.4 Caption 處理
+
 - **訓練時**: 每張圖片隨機抽樣 1 個 caption（data augmentation）
 - **驗證/測試時**: 使用第 1 個 caption（確保可重現性）
 - **文字預處理**: 使用 SigLIP2Processor 的標準 tokenization
 
 ### 2.5 影像預處理
+
 ```python
 # 使用 NaFlex 模式（動態解析度）
 processor = Siglip2Processor.from_pretrained(
@@ -215,22 +226,27 @@ style MEMORY fill:#ffcccc
 ### 3.2 各層詳細說明
 
 #### 3.2.1 編碼器層 (SigLIP2) ⚠️ 針對 16GB 優化
+
 - **模型**: `google/siglip2-base-patch16-256` (**不要用 large！**)
 - **參數量**: ~87M (base)
 - **輸出維度**: $d = 768$ (base)
 - **訓練策略**: **必須凍結參數**（否則 OOM）
 
 **NaFlex 模式說明**:
+
 - Native Flexible Resolution（原生彈性解析度）
 - 自動根據輸入圖片調整 patch 數量（最多 `max_num_patches=256`）
 - 優勢：保留細節的同時控制計算量
 
 **⚠️ 記憶體影響**:
+
 - 凍結時: ~2.5 GB VRAM (僅 forward pass)
 - 解凍時: ~10 GB VRAM (含 gradients & optimizer states) ❌ **不可行**
 
 #### 3.2.2 方向/幅度分解層
+
 **理論動機**:
+
 - **方向 ($d$)**: 捕捉語意相似性（用於 cosine alignment）
 - **幅度 ($m$)**: 保留「置信度」或「特徵強度」訊號
   - 假設：預訓練模型在高置信度樣本上產生較大 norm
@@ -246,7 +262,9 @@ m &= \log(n + \epsilon) \quad &\text{(log-norm)}
 $$
 
 #### 3.2.3 Hadamard 融合層
+
 **理論基礎**:
+
 - Hadamard 乘積 ($\odot$) 捕捉 **dimension-wise 的特徵共現**
 - 在 VQA 領域被證明有效（MCB, MUTAN, BAN 等方法）
 
@@ -258,7 +276,9 @@ $$
 **記憶體佔用**: ~0.3 GB (可訓練部分)
 
 #### 3.2.4 Hash 層
+
 **設計選擇**:
+
 - 使用 $\tanh$ 而非 $\text{sign}$ 以支援反向傳播
 - 訓練時：soft binary ($h \in [-1, 1]^B$)
 - 推論時：hard binary ($\text{sign}(h) \in \{-1, 1\}^B$)
@@ -270,6 +290,7 @@ $$
 ## 4) 理論基礎與數學公式
 
 ### 4.1 SigLIP2 預訓練目標（背景知識）
+
 SigLIP2 使用 **Sigmoid Loss** 取代 CLIP 的 Softmax Loss：
 
 $$
@@ -293,6 +314,7 @@ m &= \log(\|v\|_2 + \epsilon) \quad &\text{(幅度，標量)}
 $$
 
 **為什麼用 log?**
+
 - 壓縮動態範圍（避免過大的 norm 主導梯度）
 - 對應於資訊理論中的「surprise」或「熵」概念
 
@@ -303,11 +325,13 @@ p = d_{img} \odot d_{txt} = \begin{bmatrix} d_{img,1} \cdot d_{txt,1} \\ d_{img,
 $$
 
 **解釋**:
+
 - 第 $i$ 維的值 $p_i$ 反映了「該維度上兩個模態的激活一致性」
 - 若 $p_i > 0$：兩者在該維度上同向（可能代表共享的語意特徵）
 - 若 $p_i < 0$：兩者反向（可能代表互補或矛盾的特徵）
 
 **與內積的區別**:
+
 - 內積 $d_{img}^\top d_{txt}$ 是單一標量（全局相似度）
 - Hadamard 保留 $d$ 維資訊（局部交互模式）
 
@@ -371,6 +395,7 @@ $$
 $$
 
 **類別不平衡處理**:
+
 - 考慮使用 **Focal Loss** 或 **class-balanced weights**
 - COCO 80 類別分布不均（person 出現頻率遠高於 toothbrush）
 
@@ -390,11 +415,13 @@ $$
 ### 5.4 Hash Regularization (三項組合)
 
 #### 5.4.1 Quantization Loss (推向 ±1)
+
 $$
 \mathcal{L}_{\text{quant}} = \frac{1}{B} \sum_{i=1}^B (|h_i| - 1)^2
 $$
 
 #### 5.4.2 Bit Balance Loss (避免所有 bit 偏向同一極)
+
 $$
 \mathcal{L}_{\text{balance}} = \frac{1}{B} \sum_{i=1}^B \left( \frac{1}{N} \sum_{n=1}^N h_{n,i} \right)^2
 $$
@@ -404,6 +431,7 @@ $$
 **物理意義**: 希望每個 bit 在 batch 中的均值接近 0（一半 +1，一半 -1）
 
 #### 5.4.3 Bit Decorrelation Loss (鼓勵 bit 獨立)
+
 $$
 \mathcal{L}_{\text{decorr}} = \frac{1}{B^2} \sum_{i \neq j} (\text{Cov}(h_i, h_j))^2
 $$
@@ -499,7 +527,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 ### 7.1 Baseline 方法對比
 
 | 方法 | 描述 | 用途 |
-|------|------|------|
+| ------ | ------ | ------ |
 | **SigLIP2-MLP** | 直接用 MLP 分類器 on `[v_img, v_txt]`（無 decomposition, 無 hash, 無 KNN） | 證明 hash+KNN 的必要性 |
 | **SigLIP2-ZeroShot** | 計算 image embedding 與每個 tag prototype（從 tag name 編碼）的 cosine similarity，取 Top-N | 證明監督式訓練的價值 |
 | **方案 A (Direction only)** | 拿掉 magnitude 分支（僅用 `[d_img, d_txt, p_dir]`） | 證明方案 B 的價值 |
@@ -510,7 +538,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 1: 核心架構選擇（優先級最高）
 
 | ID | 變量 | 選項 | 固定參數 |
-|----|------|------|----------|
+| ---- | ------ | ------ | ---------- |
 | **A1** | Fusion 策略 | concat / +Hadamard / +Hadamard+Magnitude | B=64, K=20, freeze |
 | **A2** | Hash bits | 無 hash / 32 / 64 / 128 | 其餘同 baseline |
 | **A3** | KNN vs MLP head | KNN / 直接用分類器 / hybrid | 同上 |
@@ -518,7 +546,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 2: 訓練策略（中等優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **B1** | 是否 freeze towers | freeze / ⚠️ **不可解凍** (OOM) | RTX 5080 16GB 限制 |
 | **B2** | Loss weights | (α, γ, λ₁, λ₂) 組合 | Grid search: α ∈ {0.5, 1.0}, γ ∈ {0.05, 0.1} |
 | **B3** | max_num_patches | 256 / ⚠️ 512 需監控 | 評估解析度影響 |
@@ -527,7 +555,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 3: KNN 超參數（次要優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **C1** | K 值 | 5 / 10 / 20 / 50 | 鄰居數量 |
 | **C2** | 距離函數 | cosine(h) / hamming(sign(h)) / hybrid | 檢索策略 |
 | **C3** | Voting 策略 | uniform / softmax / rank-based / threshold | 加權方式 |
@@ -536,27 +564,32 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 ### 7.3 實驗流程
 
 #### 階段 1: Baseline 驗證（1-2 天）
+
 1. 實作 SigLIP2-MLP baseline
 2. 實作 SigLIP2-ZeroShot baseline
 3. 確認資料處理 pipeline 正確
 4. 建立評估流程
 
 #### 階段 2: 核心架構實驗（3-5 天）
+
 1. 實作完整架構
 2. 執行 Tier 1 ablations (A1-A3)
 3. 選出最佳配置
 
 #### 階段 3: 訓練策略優化（3-5 天）
+
 1. 執行 Tier 2 ablations (B1-B4)
 2. 超參數 grid search
 3. 學習率調度實驗
 
 #### 階段 4: KNN 調優（2-3 天）
+
 1. 執行 Tier 3 ablations (C1-C4)
 2. 檢索效率分析
 3. 可解釋性實驗
 
 #### 階段 5: 最終評估與分析（2-3 天）
+
 1. Test set 評估
 2. 錯誤分析
 3. 視覺化展示
@@ -595,7 +628,7 @@ hardware_info:
 ### 8.2 記憶體佔用估算表（16GB VRAM）
 
 | 組件 | 記憶體佔用 | 說明 |
-|------|-----------|------|
+| ------ | ----------- | ------ |
 | **SigLIP2-base (凍結)** | ~2.5 GB | 僅 forward pass，無 gradients |
 | **Fusion MLP** | ~0.3 GB | 可訓練參數 |
 | **Hash Layer** | ~0.1 GB | 可訓練參數 |
@@ -1389,6 +1422,7 @@ for epoch in range(num_epochs):
 ### 10.1 Multi-label 分類指標
 
 #### 10.1.1 Mean Average Precision (mAP)
+
 **定義**: 對每個樣本計算 AP，然後取平均。
 
 $$
@@ -1398,6 +1432,7 @@ $$
 其中 $P(k)$ 是前 $k$ 個預測的 precision，$\text{rel}(k)$ 是第 $k$ 個預測是否正確（0 或 1）。
 
 **實作**:
+
 ```python
 from sklearn.metrics import average_precision_score
 
@@ -1413,6 +1448,7 @@ def compute_map(y_true, y_scores):
 ```
 
 #### 10.1.2 F1-Score (Micro / Macro)
+
 **Micro F1**: 所有樣本與類別統一計算 TP/FP/FN
 **Macro F1**: 對每個類別計算 F1 後取平均
 
@@ -1427,6 +1463,7 @@ f1_macro = f1_score(y_true, y_pred, average='macro')
 ```
 
 #### 10.1.3 Precision@K / Recall@K
+
 **定義**: 只考慮 Top-K 預測的 precision/recall
 
 ```python
@@ -1536,7 +1573,7 @@ def evaluate_comprehensive(model, dataloader, config):
 #### 11.1.1 記憶體使用建議
 
 | 階段 | VRAM 使用 | 說明 |
-|------|-----------|------|
+| ------ | ----------- | ------ |
 | 模型載入 | ~3.0 GB | SigLIP2-base + 自定義層 |
 | 訓練 (batch=32, FP16) | ~10.2 GB | 包含 optimizer states |
 | 推論 (batch=64, FP16) | ~6.5 GB | 無需 optimizer states |
@@ -1545,6 +1582,7 @@ def evaluate_comprehensive(model, dataloader, config):
 #### 11.1.2 如果遇到 OOM，依序嘗試
 
 **Level 1: 軟性優化（無精度損失）**
+
 ```python
 # 1. 降低 batch size
 training.batch_size = 16
@@ -1555,6 +1593,7 @@ memory_optimization.empty_cache_steps = 50
 ```
 
 **Level 2: 中度優化（微幅精度損失）**
+
 ```python
 # 3. 降低解析度
 model.max_num_patches = 196  # 從 256 降到 196
@@ -1564,6 +1603,7 @@ memory_optimization.gradient_checkpointing = true
 ```
 
 **Level 3: 激進優化（可能影響精度）**
+
 ```python
 # 5. 降低 hash bits
 model.hash.bits = 32  # 從 64 降到 32
@@ -1647,7 +1687,7 @@ if hasattr(torch, 'compile'):
 #### 11.4.1 訓練速度估算
 
 | 配置 | 速度 (iter/s) | 每 Epoch | 30 Epochs |
-|------|--------------|----------|-----------|
+| ------ | -------------- | ---------- | ----------- |
 | **baseline (推薦)** | ~1.8 | ~35 分鐘 | **17.5 小時** |
 | emergency (OOM備案) | ~2.5 | ~50 分鐘 | 25 小時 |
 | 降低解析度 | ~2.2 | ~30 分鐘 | 15 小時 |
@@ -1657,7 +1697,7 @@ if hasattr(torch, 'compile'):
 #### 11.4.2 推論速度估算
 
 | 任務 | 速度 | 說明 |
-|------|------|------|
+| ------ | ------ | ------ |
 | 單張影像推論 | ~30 ms | batch=1, FP16 |
 | 批次推論 (64) | ~1.2 s | batch=64, FP16 |
 | KNN 檢索 (K=20) | ~0.5 ms | FAISS binary, GPU |
@@ -1686,6 +1726,7 @@ nvidia-smi pmon -c 1
 ## 12) 參考文獻
 
 ### 核心方法
+
 1. **SigLIP 2**: Jiasen Lu, et al. "SigLIP 2: Multilingual Vision-Language Encoders with Improved Semantic Understanding, Localization, and Dense Features". arXiv:2502.14786, 2025.
 
 2. **MS-COCO Dataset**: Tsung-Yi Lin, et al. "Microsoft COCO: Common Objects in Context". ECCV 2014.
@@ -1693,24 +1734,28 @@ nvidia-smi pmon -c 1
 3. **MS-COCO Captions**: Xinlei Chen, et al. "Microsoft COCO Captions: Data Collection and Evaluation Server". arXiv:1504.00325, 2015.
 
 ### Hash 方法
-4. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017.
 
-5. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017.
+1. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017.
 
-6. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015.
+2. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017.
+
+3. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015.
 
 ### 多模態融合
-7. **MCB**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016.
 
-8. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017.
+1. **MCB**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016.
+
+2. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017.
 
 ### KNN 與 Multi-label
-9. **Ranking-based KNN**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012.
+
+1. **Ranking-based KNN**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012.
 
 ### 訓練技巧
-10. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017.
 
-11. **Mixed Precision Training**: Paulius Micikevicius, et al. "Mixed Precision Training". ICLR 2018.
+1. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017.
+
+2. **Mixed Precision Training**: Paulius Micikevicius, et al. "Mixed Precision Training". ICLR 2018.
 
 ---
 
@@ -1719,6 +1764,7 @@ nvidia-smi pmon -c 1
 ### 附錄 A: 完整實驗 Checklist
 
 #### 環境設置
+
 - [ ] GPU 驗證 (RTX 5080 16GB, CUDA 13.0)
 - [ ] Python 3.10+ 安裝
 - [ ] PyTorch 2.5+ (支援 CUDA 13.0)
@@ -1728,6 +1774,7 @@ nvidia-smi pmon -c 1
 - [ ] Karpathy split 下載
 
 #### 程式碼實作
+
 - [ ] DirectionMagnitudeDecomposer
 - [ ] HadamardFusion
 - [ ] HashLayer + regularization
@@ -1739,16 +1786,19 @@ nvidia-smi pmon -c 1
 - [ ] 評估函數
 
 #### Baseline 實驗
+
 - [ ] SigLIP2-MLP baseline
 - [ ] SigLIP2-ZeroShot baseline
 - [ ] 資料處理驗證
 
 #### Ablation 實驗
+
 - [ ] Tier 1: A1-A3 (核心架構)
 - [ ] Tier 2: B1-B4 (訓練策略)
 - [ ] Tier 3: C1-C4 (KNN 超參數)
 
 #### 分析與報告
+
 - [ ] 學習曲線繪製
 - [ ] Per-class metrics 分析
 - [ ] KNN 鄰居視覺化
@@ -1762,6 +1812,7 @@ nvidia-smi pmon -c 1
 **症狀**: `RuntimeError: CUDA out of memory`
 
 **解決方案**（依序嘗試）:
+
 ```bash
 # 1. 檢查當前記憶體使用
 python -c "import torch; print(torch.cuda.memory_summary())"
@@ -1781,6 +1832,7 @@ python -c "import torch; torch.cuda.empty_cache()"
 #### 訓練速度慢
 
 **檢查清單**:
+
 ```python
 # 1. 確認混合精度已啟用
 assert config.memory_optimization.mixed_precision == True
@@ -1801,6 +1853,7 @@ assert config.dataloader.pin_memory == True
 **症狀**: `RuntimeError: CUDA error: no kernel image is available`
 
 **解決**:
+
 ```bash
 # 重新安裝正確版本的 PyTorch
 pip uninstall torch torchvision
@@ -1810,7 +1863,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 ### 附錄 C: 預期結果（假設）
 
 | 方法 | mAP | F1-Micro | F1-Macro | 訓練時間 | 記憶體 |
-|------|-----|----------|----------|----------|--------|
+| ------ | ----- | ---------- | ---------- | ---------- | -------- |
 | SigLIP2-ZeroShot | 0.32 | 0.28 | 0.24 | N/A | ~3 GB |
 | SigLIP2-MLP | 0.68 | 0.71 | 0.62 | 15 小時 | ~8 GB |
 | Ours (方案 A) | 0.66 | 0.69 | 0.60 | 17.5 小時 | ~10 GB |
@@ -1821,7 +1874,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
 如果預算允許，以下升級可以提升效能：
 
 | 升級 | 預期改善 | 成本 |
-|------|---------|------|
+| ------ | --------- | ------ |
 | **RTX 5090 (32GB)** | batch_size 可達 64 (無需累積) | $$$$ |
 | **增加 RAM 至 64GB** | 更快的資料預處理 | $$ |
 | **NVMe RAID 0** | 更快的資料讀取 | $$ |
@@ -1856,6 +1909,7 @@ watch -n 1 nvidia-smi
 本實驗計畫針對你的 **RTX 5080 16GB** 硬體進行了全面優化：
 
 ### ✅ 主要優化點
+
 1. **Batch size**: 64 → 32（配合梯度累積）
 2. **混合精度**: 從建議變為必須（節省 40% VRAM）
 3. **記憶體監控**: 新增實時追蹤與警告
@@ -1863,12 +1917,14 @@ watch -n 1 nvidia-smi
 5. **緊急方案**: 提供 OOM 時的降級策略
 
 ### 📊 預期效能
+
 - 訓練速度: ~1.8 iter/s
 - 每 epoch: ~35 分鐘
 - 完整訓練: **~17.5 小時**
 - VRAM 使用: **~10.2 GB / 16 GB** (安全範圍)
 
 ### 🎯 下一步
+
 1. 按照 `setup_guide.md` 設置環境
 2. 使用本文件的優化配置
 3. 執行第一輪 baseline 訓練

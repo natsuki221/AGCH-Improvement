@@ -1,4 +1,5 @@
 # 多模態圖文多標籤分類完整實驗計畫
+
 # SigLIP 2 + 方向/幅度分解 + Hadamard 融合 + Hash + KNN
 
 > **版本**: v2.0 (完善版)  
@@ -8,6 +9,7 @@
 ---
 
 ## 目錄
+
 1. [問題定義與核心思想](#1-問題定義與核心思想)
 2. [資料集協議](#2-資料集協議)
 3. [模型架構](#3-模型架構)
@@ -26,11 +28,13 @@
 ## 1) 問題定義與核心思想
 
 ### 1.1 任務定義
+
 - **輸入**: 圖片 `image` + 對應文字敘述 `caption`
 - **輸出**: `C` 個 tags 的 multi-hot 向量 $y \in \{0,1\}^C$
 - **資料集**: MS-COCO (80 個物件類別)
 
 ### 1.2 核心創新點
+
 本研究提出一個結合監督式學習與近鄰檢索的混合架構：
 
 1. **方向/幅度分解 (方案 B)**
@@ -50,6 +54,7 @@
    - 提供可解釋性（可視覺化鄰居樣本）
 
 ### 1.3 方法優勢
+
 - **可擴展性**: Hash 層支援百萬級資料庫檢索
 - **可解釋性**: KNN 提供視覺化解釋路徑
 - **靈活性**: 可動態新增類別（更新 index）而無需重新訓練分類器
@@ -59,18 +64,20 @@
 ## 2) 資料集協議
 
 ### 2.1 MS-COCO 基本資訊
+
 - **版本**: COCO 2014 (train2014 + val2014)
-- **影像數量**: 
+- **影像數量**:
   - 訓練集: ~82,783 張
   - 驗證集: ~40,504 張
 - **物件類別**: 80 個 (detection annotations)
 - **Captions**: 每張圖片有 5 個人工標註的 captions
 
 ### 2.2 實驗切分協議
+
 採用 **Karpathy split**（影像檢索與 captioning 社群標準）：
 
 | Split | 影像數量 | 用途 |
-|-------|---------|------|
+| ------- | --------- | ------ |
 | Train | 113,287 | 模型訓練 |
 | Val | 5,000 | 超參數調整、early stopping |
 | Test | 5,000 | 最終評估 |
@@ -78,16 +85,19 @@
 **註**: Karpathy split 重新組織了 COCO 2014 train/val，更適合 caption-image 配對任務。
 
 ### 2.3 標籤定義
+
 - **Tag 來源**: 使用 COCO instance annotations 中的 80 個物件類別
 - **標籤格式**: Multi-hot vector $y \in \{0,1\}^{80}$
 - **正樣本定義**: 若影像中出現該物件類別（不限 instance 數量）
 
 ### 2.4 Caption 處理
+
 - **訓練時**: 每張圖片隨機抽樣 1 個 caption（data augmentation）
 - **驗證/測試時**: 使用第 1 個 caption（確保可重現性）
 - **文字預處理**: 使用 SigLIP2Processor 的標準 tokenization
 
 ### 2.5 影像預處理
+
 ```python
 # 使用 NaFlex 模式（動態解析度）
 processor = Siglip2Processor.from_pretrained(
@@ -191,18 +201,22 @@ style INFERENCE fill:#e1ffff
 ### 3.2 各層詳細說明
 
 #### 3.2.1 編碼器層 (SigLIP2)
+
 - **模型**: `google/siglip2-base-patch16-256`
 - **參數量**: ~87M (base) / ~304M (large)
 - **輸出維度**: $d = 768$ (base) / $d = 1024$ (large)
 - **訓練策略**: Baseline 採用 **凍結參數**（僅訓練 fusion 以後的層）
 
 **NaFlex 模式說明**:
+
 - Native Flexible Resolution（原生彈性解析度）
 - 自動根據輸入圖片調整 patch 數量（最多 `max_num_patches`）
 - 優勢：保留細節的同時控制計算量
 
 #### 3.2.2 方向/幅度分解層
+
 **理論動機**:
+
 - **方向 ($d$)**: 捕捉語意相似性（用於 cosine alignment）
 - **幅度 ($m$)**: 保留「置信度」或「特徵強度」訊號
   - 假設：預訓練模型在高置信度樣本上產生較大 norm
@@ -220,12 +234,15 @@ $$
 **Ablation 必要性**: 需驗證 $m$ 是否真的提供額外資訊（vs. 純方向對齊）
 
 #### 3.2.3 Hadamard 融合層
+
 **理論基礎**:
+
 - Hadamard 乘積 ($\odot$) 捕捉 **dimension-wise 的特徵共現**
 - 在 VQA 領域被證明有效（MCB, MUTAN, BAN 等方法）
 - 相比於 concatenation：增加非線性交互，但計算開銷小於 bilinear pooling
 
 **為什麼在方向上做 Hadamard?**
+
 - 如果在 raw embedding 上做，會混雜方向與幅度的交互
 - 我們希望 Hadamard 專注於「語意方向的一致性模式」
 
@@ -235,12 +252,15 @@ x = [d_{img}; d_{txt}; d_{img} \odot d_{txt}; m_{img}; m_{txt}] \in \mathbb{R}^{
 $$
 
 #### 3.2.4 Hash 層
+
 **設計選擇**:
+
 - 使用 $\tanh$ 而非 $\text{sign}$ 以支援反向傳播
 - 訓練時：soft binary ($h \in [-1, 1]^B$)
 - 推論時：hard binary ($\text{sign}(h) \in \{-1, 1\}^B$)
 
 **優勢**:
+
 - Hamming distance 可用 XOR + popcount 高效計算
 - 記憶體佔用小：64 bits = 8 bytes per sample
 
@@ -249,6 +269,7 @@ $$
 ## 4) 理論基礎與數學公式
 
 ### 4.1 SigLIP2 預訓練目標（背景知識）
+
 SigLIP2 使用 **Sigmoid Loss** 取代 CLIP 的 Softmax Loss：
 
 $$
@@ -272,6 +293,7 @@ m &= \log(\|v\|_2 + \epsilon) \quad &\text{(幅度，標量)}
 $$
 
 **為什麼用 log?**
+
 - 壓縮動態範圍（避免過大的 norm 主導梯度）
 - 對應於資訊理論中的「surprise」或「熵」概念
 
@@ -282,11 +304,13 @@ p = d_{img} \odot d_{txt} = \begin{bmatrix} d_{img,1} \cdot d_{txt,1} \\ d_{img,
 $$
 
 **解釋**:
+
 - 第 $i$ 維的值 $p_i$ 反映了「該維度上兩個模態的激活一致性」
 - 若 $p_i > 0$：兩者在該維度上同向（可能代表共享的語意特徵）
 - 若 $p_i < 0$：兩者反向（可能代表互補或矛盾的特徵）
 
 **與內積的區別**:
+
 - 內積 $d_{img}^\top d_{txt}$ 是單一標量（全局相似度）
 - Hadamard 保留 $d$ 維資訊（局部交互模式）
 
@@ -350,6 +374,7 @@ $$
 $$
 
 **類別不平衡處理**:
+
 - 考慮使用 **Focal Loss** 或 **class-balanced weights**
 - COCO 80 類別分布不均（person 出現頻率遠高於 toothbrush）
 
@@ -369,11 +394,13 @@ $$
 ### 5.4 Hash Regularization (三項組合)
 
 #### 5.4.1 Quantization Loss (推向 ±1)
+
 $$
 \mathcal{L}_{\text{quant}} = \frac{1}{B} \sum_{i=1}^B (|h_i| - 1)^2
 $$
 
 #### 5.4.2 Bit Balance Loss (避免所有 bit 偏向同一極)
+
 $$
 \mathcal{L}_{\text{balance}} = \frac{1}{B} \sum_{i=1}^B \left( \frac{1}{N} \sum_{n=1}^N h_{n,i} \right)^2
 $$
@@ -383,6 +410,7 @@ $$
 **物理意義**: 希望每個 bit 在 batch 中的均值接近 0（一半 +1，一半 -1）
 
 #### 5.4.3 Bit Decorrelation Loss (鼓勵 bit 獨立)
+
 $$
 \mathcal{L}_{\text{decorr}} = \frac{1}{B^2} \sum_{i \neq j} (\text{Cov}(h_i, h_j))^2
 $$
@@ -409,6 +437,7 @@ $$
 因此 Euclidean loss 完全由 cosine loss 決定，無新增資訊！
 
 **替代方案（如果仍想用 Euclidean）**:
+
 - 在 **raw embedding** $(v_{img}, v_{txt})$ 上計算（同時考慮方向與幅度差異）
 - 但需注意幅度差異是否有意義（預訓練模型的 norm 未必可靠）
 
@@ -489,6 +518,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 ### 6.3 替代檢索策略（供 Ablation）
 
 #### 方案 A: Cosine on soft hash (不二值化)
+
 ```python
 # 使用原始 tanh(h) 做 inner product
 index_cosine = faiss.IndexFlatIP(B)  # Inner Product index
@@ -498,11 +528,13 @@ index_cosine.add(h_normalized)
 ```
 
 #### 方案 B: Hamming on hard binary (baseline)
+
 ```python
 # 如上所述，使用 IndexBinaryFlat
 ```
 
 #### 方案 C: Hybrid approach
+
 ```python
 # 先用 Hamming 粗篩（快速），再用 cosine 精排（準確）
 coarse_neighbors = index_binary.search(query, K=100)
@@ -517,7 +549,7 @@ top_k = np.argsort(fine_scores)[-K:]
 ### 7.1 Baseline 方法對比
 
 | 方法 | 描述 | 用途 |
-|------|------|------|
+| ------ | ------ | ------ |
 | **SigLIP2-MLP** | 直接用 MLP 分類器 on `[v_img, v_txt]`（無 decomposition, 無 hash, 無 KNN） | 證明 hash+KNN 的必要性 |
 | **SigLIP2-ZeroShot** | 計算 image embedding 與每個 tag prototype（從 tag name 編碼）的 cosine similarity，取 Top-N | 證明監督式訓練的價值 |
 | **方案 A (Direction only)** | 拿掉 magnitude 分支（僅用 `[d_img, d_txt, p_dir]`） | 證明方案 B 的價值 |
@@ -528,7 +560,7 @@ top_k = np.argsort(fine_scores)[-K:]
 #### Tier 1: 核心架構選擇（優先級最高）
 
 | ID | 變量 | 選項 | 固定參數 |
-|----|------|------|----------|
+| ---- | ------ | ------ | ---------- |
 | **A1** | Fusion 策略 | concat / +Hadamard / +Hadamard+Magnitude | B=64, K=20, freeze |
 | **A2** | Hash bits | 無 hash / 32 / 64 / 128 | 其餘同 baseline |
 | **A3** | KNN vs MLP head | KNN / 直接用分類器 / hybrid | 同上 |
@@ -536,7 +568,7 @@ top_k = np.argsort(fine_scores)[-K:]
 #### Tier 2: 訓練策略（中等優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **B1** | 是否 freeze towers | freeze / last-2-layers / full-finetune | 評估微調必要性 |
 | **B2** | Loss weights | (α, γ, λ₁, λ₂) 組合 | Grid search: α ∈ {0.5, 1.0}, γ ∈ {0.05, 0.1} |
 | **B3** | max_num_patches | 256 / 512 / 1024 | 評估解析度影響 |
@@ -545,7 +577,7 @@ top_k = np.argsort(fine_scores)[-K:]
 #### Tier 3: KNN 超參數（次要優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **C1** | K 值 | 5 / 10 / 20 / 50 | 鄰居數量 |
 | **C2** | 距離函數 | cosine(h) / hamming(sign(h)) / hybrid | 檢索策略 |
 | **C3** | Voting 策略 | uniform / softmax / rank-based / threshold | 加權方式 |
@@ -554,27 +586,32 @@ top_k = np.argsort(fine_scores)[-K:]
 ### 7.3 實驗流程
 
 #### 階段 1: Baseline 驗證（1-2 天）
+
 1. 實作 SigLIP2-MLP baseline
 2. 實作 SigLIP2-ZeroShot baseline
 3. 確認資料處理 pipeline 正確
 4. 建立評估流程
 
 #### 階段 2: 核心架構實驗（3-5 天）
+
 1. 實作完整架構
 2. 執行 Tier 1 ablations (A1-A3)
 3. 選出最佳配置
 
 #### 階段 3: 訓練策略優化（3-5 天）
+
 1. 執行 Tier 2 ablations (B1-B4)
 2. 超參數 grid search
 3. 學習率調度實驗
 
 #### 階段 4: KNN 調優（2-3 天）
+
 1. 執行 Tier 3 ablations (C1-C4)
 2. 檢索效率分析
 3. 可解釋性實驗
 
 #### 階段 5: 最終評估與分析（2-3 天）
+
 1. Test set 評估
 2. 錯誤分析
 3. 視覺化展示
@@ -687,7 +724,7 @@ grid_search:
 ### 8.3 記憶體與速度估算
 
 | 配置 | Batch Size | VRAM 佔用 | 訓練速度 (iter/s) |
-|------|-----------|-----------|------------------|
+| ------ | ----------- | ----------- | ------------------ |
 | Base + 256 patches + freeze | 64 | ~18 GB | ~2.5 |
 | Base + 512 patches + freeze | 32 | ~20 GB | ~1.2 |
 | Base + 256 patches + finetune | 32 | ~22 GB | ~1.0 |
@@ -925,6 +962,7 @@ def train_epoch(model, dataloader, optimizer, scheduler, config):
 ### 9.3 訓練穩定性技巧
 
 #### Mixed Precision Training
+
 ```python
 from torch.cuda.amp import autocast, GradScaler
 
@@ -943,6 +981,7 @@ for batch in dataloader:
 ```
 
 #### Learning Rate Warm-up
+
 ```python
 from transformers import get_cosine_schedule_with_warmup
 
@@ -957,6 +996,7 @@ scheduler = get_cosine_schedule_with_warmup(
 ```
 
 #### Gradient Accumulation（如果記憶體不足）
+
 ```python
 accumulation_steps = 4  # 等效 batch size * 4
 
@@ -1016,6 +1056,7 @@ def load_checkpoint(model, optimizer, path):
 ### 10.1 Multi-label 分類指標
 
 #### 10.1.1 Mean Average Precision (mAP)
+
 **定義**: 對每個樣本計算 AP，然後取平均。
 
 $$
@@ -1025,6 +1066,7 @@ $$
 其中 $P(k)$ 是前 $k$ 個預測的 precision，$\text{rel}(k)$ 是第 $k$ 個預測是否正確（0 或 1）。
 
 **實作**:
+
 ```python
 from sklearn.metrics import average_precision_score
 
@@ -1040,6 +1082,7 @@ def compute_map(y_true, y_scores):
 ```
 
 #### 10.1.2 F1-Score (Micro / Macro)
+
 **Micro F1**: 所有樣本與類別統一計算 TP/FP/FN
 **Macro F1**: 對每個類別計算 F1 後取平均
 
@@ -1054,6 +1097,7 @@ f1_macro = f1_score(y_true, y_pred, average='macro')
 ```
 
 #### 10.1.3 Precision@K / Recall@K
+
 **定義**: 只考慮 Top-K 預測的 precision/recall
 
 ```python
@@ -1078,6 +1122,7 @@ def recall_at_k(y_true, y_scores, k=5):
 ```
 
 #### 10.1.4 Hamming Loss
+
 **定義**: 錯誤預測的比例
 
 $$
@@ -1093,6 +1138,7 @@ loss = hamming_loss(y_true, y_pred)
 ### 10.2 檢索效率指標
 
 #### 10.2.1 Index 建立時間
+
 ```python
 import time
 
@@ -1105,6 +1151,7 @@ print(f"Index build time: {build_time:.2f}s for {len(train_binary_codes)} sample
 ```
 
 #### 10.2.2 查詢延遲
+
 ```python
 query_times = []
 for query in test_queries:
@@ -1120,6 +1167,7 @@ print(f"Throughput: {throughput:.2f} queries/s")
 ```
 
 #### 10.2.3 記憶體佔用
+
 ```python
 # Binary index: B bits per sample
 memory_binary = (hash_bits / 8) * num_samples  # bytes
@@ -1185,6 +1233,7 @@ def evaluate(model, dataloader, index, train_labels, config):
 ### 10.4 視覺化範例
 
 #### 10.4.1 Confusion Matrix（每個類別）
+
 ```python
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -1221,6 +1270,7 @@ def plot_per_class_metrics(y_true, y_pred, class_names):
 ```
 
 #### 10.4.2 KNN 鄰居視覺化
+
 ```python
 def visualize_knn_neighbors(query_image, query_caption, neighbor_images, 
                             neighbor_captions, neighbor_labels, predicted_tags):
@@ -1250,6 +1300,7 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 ## 11) 參考文獻
 
 ### 核心方法
+
 1. **SigLIP 2**: Jiasen Lu, et al. "SigLIP 2: Multilingual Vision-Language Encoders with Improved Semantic Understanding, Localization, and Dense Features". arXiv:2502.14786, 2025. [https://arxiv.org/abs/2502.14786](https://arxiv.org/abs/2502.14786)
 
 2. **MS-COCO Dataset**: Tsung-Yi Lin, et al. "Microsoft COCO: Common Objects in Context". ECCV 2014. [https://arxiv.org/abs/1405.0312](https://arxiv.org/abs/1405.0312)
@@ -1257,35 +1308,40 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 3. **MS-COCO Captions**: Xinlei Chen, et al. "Microsoft COCO Captions: Data Collection and Evaluation Server". arXiv:1504.00325, 2015. [https://arxiv.org/abs/1504.00325](https://arxiv.org/abs/1504.00325)
 
 ### Hash 方法
-4. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017. [http://papers.neurips.cc/paper/6842-deep-supervised-discrete-hashing.pdf](http://papers.neurips.cc/paper/6842-deep-supervised-discrete-hashing.pdf)
 
-5. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017. [https://arxiv.org/abs/1702.00758](https://arxiv.org/abs/1702.00758)
+1. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017. [http://papers.neurips.cc/paper/6842-deep-supervised-discrete-hashing.pdf](http://papers.neurips.cc/paper/6842-deep-supervised-discrete-hashing.pdf)
 
-6. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015. [https://arxiv.org/abs/1509.05472](https://arxiv.org/abs/1509.05472)
+2. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017. [https://arxiv.org/abs/1702.00758](https://arxiv.org/abs/1702.00758)
+
+3. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015. [https://arxiv.org/abs/1509.05472](https://arxiv.org/abs/1509.05472)
 
 ### 多模態融合
-7. **MCB (Multimodal Compact Bilinear Pooling)**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016. [https://arxiv.org/abs/1606.01847](https://arxiv.org/abs/1606.01847)
 
-8. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017. [https://arxiv.org/abs/1705.06676](https://arxiv.org/abs/1705.06676)
+1. **MCB (Multimodal Compact Bilinear Pooling)**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016. [https://arxiv.org/abs/1606.01847](https://arxiv.org/abs/1606.01847)
 
-9. **BAN (Bilinear Attention Networks)**: Jin-Hwa Kim, et al. "Bilinear Attention Networks". NeurIPS 2018. [https://arxiv.org/abs/1805.07932](https://arxiv.org/abs/1805.07932)
+2. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017. [https://arxiv.org/abs/1705.06676](https://arxiv.org/abs/1705.06676)
+
+3. **BAN (Bilinear Attention Networks)**: Jin-Hwa Kim, et al. "Bilinear Attention Networks". NeurIPS 2018. [https://arxiv.org/abs/1805.07932](https://arxiv.org/abs/1805.07932)
 
 ### KNN 與 Multi-label
-10. **Ranking-based KNN for Multi-label**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012. [http://proceedings.mlr.press/v25/chiang12/chiang12.pdf](http://proceedings.mlr.press/v25/chiang12/chiang12.pdf)
 
-11. **ML-KNN**: Min-Ling Zhang and Zhi-Hua Zhou. "ML-KNN: A lazy learning approach to multi-label learning". Pattern Recognition, 2007.
+1. **Ranking-based KNN for Multi-label**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012. [http://proceedings.mlr.press/v25/chiang12/chiang12.pdf](http://proceedings.mlr.press/v25/chiang12/chiang12.pdf)
+
+2. **ML-KNN**: Min-Ling Zhang and Zhi-Hua Zhou. "ML-KNN: A lazy learning approach to multi-label learning". Pattern Recognition, 2007.
 
 ### 訓練技巧
-12. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017. [https://arxiv.org/abs/1708.02002](https://arxiv.org/abs/1708.02002)
 
-13. **Uncertainty Weighting**: Alex Kendall, et al. "Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics". CVPR 2018. [https://arxiv.org/abs/1705.07115](https://arxiv.org/abs/1705.07115)
+1. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017. [https://arxiv.org/abs/1708.02002](https://arxiv.org/abs/1708.02002)
+
+2. **Uncertainty Weighting**: Alex Kendall, et al. "Multi-Task Learning Using Uncertainty to Weigh Losses for Scene Geometry and Semantics". CVPR 2018. [https://arxiv.org/abs/1705.07115](https://arxiv.org/abs/1705.07115)
 
 ### 工具與框架
-14. **Transformers Library**: Hugging Face. [https://huggingface.co/docs/transformers](https://huggingface.co/docs/transformers)
 
-15. **FAISS**: Jeff Johnson, et al. "Billion-scale similarity search with GPUs". IEEE Transactions on Big Data, 2019. [https://github.com/facebookresearch/faiss](https://github.com/facebookresearch/faiss)
+1. **Transformers Library**: Hugging Face. [https://huggingface.co/docs/transformers](https://huggingface.co/docs/transformers)
 
-16. **Mermaid Diagrams**: [https://mermaid.js.org/](https://mermaid.js.org/)
+2. **FAISS**: Jeff Johnson, et al. "Billion-scale similarity search with GPUs". IEEE Transactions on Big Data, 2019. [https://github.com/facebookresearch/faiss](https://github.com/facebookresearch/faiss)
+
+3. **Mermaid Diagrams**: [https://mermaid.js.org/](https://mermaid.js.org/)
 
 ---
 
@@ -1294,6 +1350,7 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 ### 附錄 A: 完整實驗 Checklist
 
 #### 實作前準備
+
 - [ ] 設定開發環境（Python 3.10+, PyTorch 2.0+, CUDA 12.1+）
 - [ ] 安裝依賴套件（transformers, faiss-gpu, scikit-learn, etc.）
 - [ ] 下載 MS-COCO 2014 資料集（~13GB）
@@ -1301,6 +1358,7 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 - [ ] 下載 SigLIP2 預訓練權重（自動，首次執行時）
 
 #### 程式碼實作
+
 - [ ] 實作 `DirectionMagnitudeDecomposer`
 - [ ] 實作 `HadamardFusion`
 - [ ] 實作 `HashLayer` 與 `hash_regularization`
@@ -1311,11 +1369,13 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 - [ ] 實作評估函數與指標計算
 
 #### Baseline 實驗
+
 - [ ] SigLIP2-MLP baseline
 - [ ] SigLIP2-ZeroShot baseline
 - [ ] 驗證資料處理正確性（視覺化幾個樣本）
 
 #### Ablation 實驗
+
 - [ ] Tier 1: A1 (Fusion 策略對比)
 - [ ] Tier 1: A2 (Hash bits 對比)
 - [ ] Tier 1: A3 (KNN vs MLP head)
@@ -1326,6 +1386,7 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 - [ ] Tier 3: C1-C4 (KNN 超參數)
 
 #### 分析與報告
+
 - [ ] 繪製學習曲線（training/validation loss）
 - [ ] 繪製 per-class metrics bar chart
 - [ ] 視覺化 KNN 鄰居（至少 10 個範例）
@@ -1333,6 +1394,7 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 - [ ] 撰寫實驗報告（含所有 ablation 結果表格）
 
 #### 最終交付
+
 - [ ] 清理程式碼並加上註解
 - [ ] 撰寫 README.md（含安裝與使用說明）
 - [ ] 儲存最佳模型 checkpoint
@@ -1342,9 +1404,11 @@ def visualize_knn_neighbors(query_image, query_caption, neighbor_images,
 ### 附錄 B: 故障排除指南
 
 #### 記憶體不足（OOM）
+
 **症狀**: CUDA out of memory error
 
 **解決方案**:
+
 1. 降低 `batch_size`（64 → 32 → 16）
 2. 降低 `max_num_patches`（512 → 256）
 3. 啟用 gradient checkpointing（節省 30-40% 記憶體）
@@ -1356,18 +1420,22 @@ model.model.gradient_checkpointing_enable()
 ```
 
 #### 訓練不收斂
+
 **症狀**: Loss 不下降或震盪劇烈
 
 **可能原因與解決**:
+
 1. **學習率過大**: 降低至 1e-4 或加長 warmup
 2. **Hash 正則過強**: 降低 γ (0.1 → 0.05)
 3. **梯度爆炸**: 檢查 gradient norm，調低 clip threshold
 4. **資料問題**: 檢查標籤分布、是否有 NaN
 
 #### KNN 檢索速度慢
+
 **症狀**: 每個 query 超過 10ms
 
 **優化方案**:
+
 1. 使用 GPU 版本 FAISS（`faiss-gpu`）
 2. 使用近似檢索（IVF index）而非 Flat index
 3. 降低 hash bits（128 → 64）
@@ -1382,9 +1450,11 @@ gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, index)
 ```
 
 #### Evaluation 指標異常
+
 **症狀**: mAP 永遠是 0 或 1
 
 **檢查清單**:
+
 1. 確認 `y_true` 與 `y_scores` shape 正確（N, C）
 2. 確認 `y_scores` 是機率而非 logits（需 sigmoid）
 3. 確認沒有全 0 或全 1 的樣本
@@ -1393,13 +1463,14 @@ gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, index)
 ### 附錄 C: 預期實驗結果（假設）
 
 | 方法 | mAP | F1-Micro | F1-Macro | P@5 | Query Latency (ms) |
-|------|-----|----------|----------|-----|-------------------|
+| ------ | ----- | ---------- | ---------- | ----- | ------------------- |
 | SigLIP2-ZeroShot | 0.32 | 0.28 | 0.24 | 0.41 | 15 (cosine on raw) |
 | SigLIP2-MLP | 0.68 | 0.71 | 0.62 | 0.74 | N/A (direct) |
 | Ours (方案 A, no magnitude) | 0.66 | 0.69 | 0.60 | 0.72 | 3.2 (hamming) |
 | **Ours (方案 B, full)** | **0.71** | **0.74** | **0.65** | **0.78** | **2.8** |
 
 **預期觀察**:
+
 1. 方案 B 應優於方案 A（證明 magnitude 有用）
 2. KNN 應與 MLP head 效能相近，但提供可解釋性
 3. Hamming 檢索應比 cosine 快 5-10 倍
@@ -1408,6 +1479,7 @@ gpu_index = faiss.index_cpu_to_gpu(gpu_res, 0, index)
 ### 附錄 D: 資料集統計資訊
 
 #### MS-COCO 80 類別列表
+
 ```
 person, bicycle, car, motorcycle, airplane, bus, train, truck, boat, 
 traffic light, fire hydrant, stop sign, parking meter, bench, bird, 
@@ -1422,8 +1494,9 @@ clock, vase, scissors, teddy bear, hair drier, toothbrush
 ```
 
 #### 類別頻率分布（訓練集）
+
 | 類別 | 出現次數 | 佔比 |
-|------|---------|------|
+| ------ | --------- | ------ |
 | person | 262,465 | 24.1% |
 | chair | 38,073 | 3.5% |
 | car | 36,781 | 3.4% |
@@ -1435,7 +1508,7 @@ clock, vase, scissors, teddy bear, hair drier, toothbrush
 ### 附錄 E: 硬體需求建議
 
 | 組件 | 最低需求 | 推薦配置 |
-|------|---------|---------|
+| ------ | --------- | --------- |
 | GPU | RTX 3090 (24GB) | RTX 5080 (24GB) 或更高 |
 | CPU | 8 cores | 16 cores |
 | RAM | 32 GB | 64 GB |
@@ -1443,6 +1516,7 @@ clock, vase, scissors, teddy bear, hair drier, toothbrush
 | CUDA | 11.8+ | 12.1+ |
 
 **估計訓練時間**（RTX 5080, baseline 配置）:
+
 - 每個 epoch: ~30 分鐘
 - 總訓練（30 epochs）: ~15 小時
 - Ablation 實驗（8 組）: ~5 天（可平行化）
@@ -1454,12 +1528,14 @@ clock, vase, scissors, teddy bear, hair drier, toothbrush
 本實驗計畫整合了多模態學習、深度 hashing、與近鄰檢索的前沿技術，針對 MS-COCO 多標籤分類任務提出一個高效且可解釋的解決方案。
 
 **核心貢獻**:
+
 1. 提出方向/幅度分解（方案 B）以保留 embedding 的置信度資訊
 2. 結合 Hadamard 乘積捕捉跨模態的局部交互模式
 3. 設計完整的 hash 正則化策略（quantization + balance + decorrelation）
 4. 驗證 KNN 在保留監督式訓練準確度的同時提供可解釋性
 
 **後續工作**:
+
 - 探索更複雜的融合機制（Tucker decomposition, attention-based fusion）
 - 嘗試更大的 SigLIP2 模型（large, giant）
 - 遷移至其他多標籤資料集（Open Images, Visual Genome）

@@ -14,7 +14,7 @@
 根據分析師報告，本專案目前獲得 **9.1/10** 的整體評分，5-Fold 交叉驗證結果展現極高穩定性：
 
 | 指標        | 數值            | 評價               |
-|------------|-----------------|-------------------|
+| ------------ | ----------------- | ------------------- |
 | 平均 mAP    | 0.6785         | 中上水準           |
 | 標準差      | ± 0.012        | 極優 (CV = 1.77%) |
 | 最佳 Fold   | Fold 1 (0.6982) | -                 |
@@ -48,6 +48,7 @@ python scripts/test_on_holdout.py \
 ```
 
 **技術細節**：
+
 - 載入 Karpathy test split (5,000 張影像)
 - 使用已訓練的最佳模型進行推論
 - 計算完整評估指標並輸出 JSON
@@ -55,6 +56,7 @@ python scripts/test_on_holdout.py \
 **預期結果**：Test mAP ≈ 0.67-0.69
 
 **驗證方式**：
+
 - [ ] 確認 test set 正確載入 5,000 張影像
 - [ ] 模型推論無錯誤
 - [ ] 輸出 JSON 包含所有 11 項指標
@@ -99,6 +101,7 @@ def aggregate_results(fold_results: List[Dict]) -> Dict:
 ```
 
 **論文報告格式**：
+
 ```
 Results (5-Fold CV, Mean ± Std):
   - mAP:            67.85 ± 1.20
@@ -110,6 +113,7 @@ Results (5-Fold CV, Mean ± Std):
 ```
 
 **驗證方式**：
+
 - [ ] 執行 `aggregate_cv_results.py --include_all_metrics`
 - [ ] 確認輸出包含所有 11 項指標
 - [ ] 更新 `EXPERIMENT_REPORT.md`
@@ -166,14 +170,17 @@ def print_analysis(per_class_ap):
 ```
 
 **預期發現**：
+
 - **Top 10**：常見物件 (person, car, chair) AP > 0.80
 - **Bottom 10**：長尾類別 (toothbrush, hair drier) AP < 0.40
 
 **視覺化輸出**：
+
 - Bar chart：80 類別 AP 分布圖
 - Heatmap：類別頻率 vs AP 相關性
 
 **驗證方式**：
+
 - [ ] 執行腳本成功輸出 Top/Bottom 10
 - [ ] 生成視覺化圖表 (PNG/PDF)
 - [ ] 分析結果加入實驗報告
@@ -231,10 +238,12 @@ def evaluate_ensemble():
 ```
 
 **預期效果**：
+
 - Single model mAP: 0.6785
 - Ensemble mAP: **~0.70** (+2.6%)
 
 **驗證方式**：
+
 - [ ] 5 個模型全部成功載入
 - [ ] Ensemble 推論不 OOM
 - [ ] 輸出對比表格：Single vs Ensemble
@@ -291,11 +300,13 @@ def visualize_failures(results, num_examples=10):
 ```
 
 **產出**：
+
 1. False Positive 分析表 (最常誤報的類別)
 2. False Negative 分析表 (最常漏掉的類別)
 3. 視覺化案例圖 (10-20 張)
 
 **驗證方式**：
+
 - [ ] 分析腳本成功執行
 - [ ] 輸出至少 10 張失敗案例視覺化
 - [ ] 識別 Top 5 最容易誤報/漏報的類別
@@ -309,7 +320,7 @@ def visualize_failures(results, num_examples=10):
 **設計**：
 
 | ID    | 變量               | 設定選項                              | 備註            |
-|-------|-------------------|--------------------------------------|-----------------|
+| ------- | ------------------- | -------------------------------------- | ----------------- |
 | AB-1  | Hash Bits         | 32 / **64** / 128                    | Baseline: 64    |
 | AB-2  | Fusion Strategy   | concat_only / **hadamard** / hadamard+mag | Baseline: hadamard |
 | AB-3  | Classifier Type   | mlp_only / knn_only / **hybrid**     | Baseline: hybrid |
@@ -331,6 +342,7 @@ experiment:
 ```
 
 **執行指令**：
+
 ```bash
 # 每個設定跑 3 次，報告 mean ± std
 for config in configs/ablation/*.yaml; do
@@ -341,6 +353,7 @@ done
 ```
 
 **驗證方式**：
+
 - [ ] 每個 ablation 至少 3 個設定
 - [ ] 每個設定執行 3 次取平均
 - [ ] 產出視覺化對比圖
@@ -428,6 +441,7 @@ def analyze_fold_distribution():
 ```
 
 **解決方案選項**：
+
 1. 使用 **Stratified K-Fold** 確保類別分布均勻
 2. 或在論文中說明此差異並分析原因
 
@@ -438,7 +452,7 @@ def analyze_fold_distribution():
 ### 第 1 週 (Phase 1 + Phase 2 前半)
 
 | 天數 | 任務                     | 預計產出                        |
-|------|--------------------------|--------------------------------|
+| ------ | -------------------------- | -------------------------------- |
 | 1    | Test Set 評估            | `test_results_fold1.json`      |
 | 1    | 補充完整指標              | 更新 `EXPERIMENT_REPORT.md`    |
 | 2    | Per-class 分析           | 分析報告 + 視覺化圖表           |
@@ -447,7 +461,7 @@ def analyze_fold_distribution():
 ### 第 2 週 (Phase 2 後半 + Phase 3 開始)
 
 | 天數 | 任務                     | 預計產出                        |
-|------|--------------------------|--------------------------------|
+| ------ | -------------------------- | -------------------------------- |
 | 1    | Fold 1 異常分析          | 分布比較報告                    |
 | 2    | 錯誤分析                 | 失敗案例視覺化 + 分析報告        |
 | 2    | Ablation Study 前半      | Hash bits / Fusion 實驗結果    |
@@ -455,7 +469,7 @@ def analyze_fold_distribution():
 ### 第 3 週 (Phase 3 完成)
 
 | 天數 | 任務                     | 預計產出                        |
-|------|--------------------------|--------------------------------|
+| ------ | -------------------------- | -------------------------------- |
 | 2    | Ablation Study 後半      | 完整對比表格 + 視覺化           |
 | 2    | 優化實驗                 | 增強/調度/解凍結果              |
 | 1    | 整理結果                 | 最終實驗報告                    |

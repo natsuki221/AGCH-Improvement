@@ -1,4 +1,5 @@
 # 多模態圖文多標籤分類完整實驗計畫
+
 # SigLIP 2 + 方向/幅度分解 + Hadamard 融合 + Hash + KNN
 
 > **版本**: v2.2 (AGCH-Improvement 專案優化版)  
@@ -13,6 +14,7 @@
 ## 📋 更新日誌 (v2.2)
 
 ### 基於實際專案架構的調整
+
 - ✅ **CUDA 版本修正**: 13.0 → **12.4**（對應你的系統）
 - ✅ **PyTorch 配置**: 已設定 pytorch-cu124 index
 - ✅ **專案結構整合**: 完全對應 `AGCH-Improvement` 專案
@@ -22,6 +24,7 @@
 - ✅ **Python 版本**: 3.11+ (符合 pyproject.toml)
 
 ### 針對 RTX 5080 16GB 的核心優化（維持）
+
 - ✅ Batch size: 64 → **32**
 - ✅ 混合精度: **必須啟用**
 - ✅ 梯度累積: **2 步**
@@ -31,6 +34,7 @@
 ---
 
 ## 目錄
+
 1. [專案結構](#1-專案結構)
 2. [環境配置](#2-環境配置)
 3. [問題定義與核心思想](#3-問題定義與核心思想)
@@ -117,6 +121,7 @@ AGCH-Improvement/
 ### 1.2 待建立的檔案清單
 
 #### 配置檔案
+
 ```bash
 # 建立配置目錄結構
 mkdir -p configs/{experiments,hardware}
@@ -129,6 +134,7 @@ configs/experiments/ablation_hash.yaml      # Hash bits ablation
 ```
 
 #### 原始碼
+
 ```bash
 # 核心模型檔案（下文會提供完整實作）
 src/siglip2_multimodal_hash/model.py        # 模型定義
@@ -139,6 +145,7 @@ src/siglip2_multimodal_hash/knn.py          # KNN 檢索
 ```
 
 #### 訓練與評估腳本
+
 ```bash
 # 主要腳本（下文會提供完整實作）
 scripts/train.py                            # 訓練腳本
@@ -242,6 +249,7 @@ python scripts/verify_setup.py
 ```
 
 **預期輸出**:
+
 ```
 ============================================================
 環境驗證
@@ -308,11 +316,13 @@ python scripts/download_karpathy_split.py
 ## 3) 問題定義與核心思想
 
 ### 3.1 任務定義
+
 - **輸入**: 圖片 `image` + 對應文字敘述 `caption`
 - **輸出**: `C` 個 tags 的 multi-hot 向量 $y \in \{0,1\}^C$
 - **資料集**: MS-COCO (80 個物件類別)
 
 ### 3.2 核心創新點
+
 本研究提出一個結合監督式學習與近鄰檢索的混合架構：
 
 1. **方向/幅度分解 (方案 B)**
@@ -338,7 +348,7 @@ python scripts/download_karpathy_split.py
 ### 4.1 MS-COCO 基本資訊（你已下載）
 
 - **版本**: COCO 2014 (train2014 + val2014) ✅
-- **影像數量**: 
+- **影像數量**:
   - 訓練集: 82,783 張 ✅
   - 驗證集: 40,504 張 ✅
 - **物件類別**: 80 個 (detection annotations) ✅
@@ -349,12 +359,13 @@ python scripts/download_karpathy_split.py
 採用 **Karpathy split**（影像檢索與 captioning 社群標準）：
 
 | Split | 影像數量 | 用途 | 狀態 |
-|-------|---------|------|------|
+| ------- | --------- | ------ | ------ |
 | Train | 113,287 | 模型訓練 | ⚠️ 待下載 karpathy_split.json |
 | Val | 5,000 | 超參數調整、early stopping | 同上 |
 | Test | 5,000 | 最終評估 | 同上 |
 
 **下載 Karpathy split**:
+
 ```bash
 python scripts/download_karpathy_split.py
 ```
@@ -405,6 +416,7 @@ $$
 $$
 
 **類別不平衡處理**:
+
 - 考慮使用 **Focal Loss** 或 **class-balanced weights**
 - COCO 80 類別分布不均（person 出現頻率遠高於 toothbrush）
 
@@ -424,11 +436,13 @@ $$
 ### 5.4 Hash Regularization (三項組合)
 
 #### 5.4.1 Quantization Loss (推向 ±1)
+
 $$
 \mathcal{L}_{\text{quant}} = \frac{1}{B} \sum_{i=1}^B (|h_i| - 1)^2
 $$
 
 #### 5.4.2 Bit Balance Loss (避免所有 bit 偏向同一極)
+
 $$
 \mathcal{L}_{\text{balance}} = \frac{1}{B} \sum_{i=1}^B \left( \frac{1}{N} \sum_{n=1}^N h_{n,i} \right)^2
 $$
@@ -438,6 +452,7 @@ $$
 **物理意義**: 希望每個 bit 在 batch 中的均值接近 0（一半 +1，一半 -1）
 
 #### 5.4.3 Bit Decorrelation Loss (鼓勵 bit 獨立)
+
 $$
 \mathcal{L}_{\text{decorr}} = \frac{1}{B^2} \sum_{i \neq j} (\text{Cov}(h_i, h_j))^2
 $$
@@ -533,7 +548,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 ### 7.1 Baseline 方法對比
 
 | 方法 | 描述 | 用途 |
-|------|------|------|
+| ------ | ------ | ------ |
 | **SigLIP2-MLP** | 直接用 MLP 分類器 on `[v_img, v_txt]`（無 decomposition, 無 hash, 無 KNN） | 證明 hash+KNN 的必要性 |
 | **SigLIP2-ZeroShot** | 計算 image embedding 與每個 tag prototype（從 tag name 編碼）的 cosine similarity，取 Top-N | 證明監督式訓練的價值 |
 | **方案 A (Direction only)** | 拿掉 magnitude 分支（僅用 `[d_img, d_txt, p_dir]`） | 證明方案 B 的價值 |
@@ -544,7 +559,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 1: 核心架構選擇（優先級最高）
 
 | ID | 變量 | 選項 | 固定參數 |
-|----|------|------|----------|
+| ---- | ------ | ------ | ---------- |
 | **A1** | Fusion 策略 | concat / +Hadamard / +Hadamard+Magnitude | B=64, K=20, freeze |
 | **A2** | Hash bits | 無 hash / 32 / 64 / 128 | 其餘同 baseline |
 | **A3** | KNN vs MLP head | KNN / 直接用分類器 / hybrid | 同上 |
@@ -552,7 +567,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 2: 訓練策略（中等優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **B1** | 是否 freeze towers | freeze / ⚠️ **不可解凍** (OOM) | RTX 5080 16GB 限制 |
 | **B2** | Loss weights | (α, γ, λ₁, λ₂) 組合 | Grid search: α ∈ {0.5, 1.0}, γ ∈ {0.05, 0.1} |
 | **B3** | max_num_patches | 256 / ⚠️ 512 需監控 | 評估解析度影響 |
@@ -561,7 +576,7 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 #### Tier 3: KNN 超參數（次要優先級）
 
 | ID | 變量 | 選項 | 說明 |
-|----|------|------|------|
+| ---- | ------ | ------ | ------ |
 | **C1** | K 值 | 5 / 10 / 20 / 50 | 鄰居數量 |
 | **C2** | 距離函數 | cosine(h) / hamming(sign(h)) / hybrid | 檢索策略 |
 | **C3** | Voting 策略 | uniform / softmax / rank-based / threshold | 加權方式 |
@@ -570,27 +585,32 @@ def predict_tags(query_hash, index, train_labels, K=20, tau=0.07, top_n=5):
 ### 7.3 實驗流程
 
 #### 階段 1: Baseline 驗證（1-2 天）
+
 1. 實作 SigLIP2-MLP baseline
 2. 實作 SigLIP2-ZeroShot baseline
 3. 確認資料處理 pipeline 正確
 4. 建立評估流程
 
 #### 階段 2: 核心架構實驗（3-5 天）
+
 1. 實作完整架構
 2. 執行 Tier 1 ablations (A1-A3)
 3. 選出最佳配置
 
 #### 階段 3: 訓練策略優化（3-5 天）
+
 1. 執行 Tier 2 ablations (B1-B4)
 2. 超參數 grid search
 3. 學習率調度實驗
 
 #### 階段 4: KNN 調優（2-3 天）
+
 1. 執行 Tier 3 ablations (C1-C4)
 2. 檢索效率分析
 3. 可解釋性實驗
 
 #### 階段 5: 最終評估與分析（2-3 天）
+
 1. Test set 評估
 2. 錯誤分析
 3. 視覺化展示
@@ -629,7 +649,7 @@ hardware_info:
 ### 8.2 記憶體佔用估算表（16GB VRAM）
 
 | 組件 | 記憶體佔用 | 說明 |
-|------|-----------|------|
+| ------ | ----------- | ------ |
 | **SigLIP2-base (凍結)** | ~2.5 GB | 僅 forward pass，無 gradients |
 | **Fusion MLP** | ~0.3 GB | 可訓練參數 |
 | **Hash Layer** | ~0.1 GB | 可訓練參數 |
@@ -2643,6 +2663,7 @@ python scripts/check_memory_config.py
 ## 14) 參考文獻
 
 ### 核心方法
+
 1. **SigLIP 2**: Jiasen Lu, et al. "SigLIP 2: Multilingual Vision-Language Encoders with Improved Semantic Understanding, Localization, and Dense Features". arXiv:2502.14786, 2025.
 
 2. **MS-COCO Dataset**: Tsung-Yi Lin, et al. "Microsoft COCO: Common Objects in Context". ECCV 2014.
@@ -2650,24 +2671,28 @@ python scripts/check_memory_config.py
 3. **MS-COCO Captions**: Xinlei Chen, et al. "Microsoft COCO Captions: Data Collection and Evaluation Server". arXiv:1504.00325, 2015.
 
 ### Hash 方法
-4. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017.
 
-5. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017.
+1. **Deep Supervised Discrete Hashing**: Qi Li, et al. "Deep Supervised Discrete Hashing". NeurIPS 2017.
 
-6. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015.
+2. **HashNet**: Zhangjie Cao, et al. "HashNet: Deep Learning to Hash by Continuation". ICCV 2017.
+
+3. **Learning to Hash Survey**: Jun Wang, et al. "Learning to Hash for Indexing Big Data - A Survey". Proceedings of the IEEE, 2015.
 
 ### 多模態融合
-7. **MCB**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016.
 
-8. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017.
+1. **MCB**: Akira Fukui, et al. "Multimodal Compact Bilinear Pooling for Visual Question Answering and Visual Grounding". EMNLP 2016.
+
+2. **MUTAN**: Hedi Ben-younes, et al. "MUTAN: Multimodal Tucker Fusion for Visual Question Answering". ICCV 2017.
 
 ### KNN 與 Multi-label
-9. **Ranking-based KNN**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012.
+
+1. **Ranking-based KNN**: Derek Hoiem, et al. "A Ranking-based KNN Approach for Multi-label Classification". AISTATS 2012.
 
 ### 訓練技巧
-10. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017.
 
-11. **Mixed Precision Training**: Paulius Micikevicius, et al. "Mixed Precision Training". ICLR 2018.
+1. **Focal Loss**: Tsung-Yi Lin, et al. "Focal Loss for Dense Object Detection". ICCV 2017.
+
+2. **Mixed Precision Training**: Paulius Micikevicius, et al. "Mixed Precision Training". ICLR 2018.
 
 ---
 
@@ -2737,6 +2762,7 @@ watch -n 1 nvidia-smi
 ### 附錄 B: 目前專案狀態檢查清單
 
 #### ✅ 已完成
+
 - [x] 專案目錄結構建立
 - [x] `.gitignore` 設定
 - [x] `pyproject.toml` 配置（含 CUDA 12.4）
@@ -2746,6 +2772,7 @@ watch -n 1 nvidia-smi
 - [x] 虛擬環境設定
 
 #### ⚠️ 待完成
+
 - [ ] 升級 FAISS 到 GPU 版本
 - [ ] 建立資料集索引（`index_train2014.pkl`, `index_val2014.pkl`）
 - [ ] 下載 Karpathy split（`karpathy_split.json`）
@@ -2792,6 +2819,7 @@ python scripts/train.py
 本實驗計畫已完全針對你的 **AGCH-Improvement 專案**進行優化：
 
 ### ✅ 主要特點
+
 1. **完全匹配你的專案結構** - 所有路徑、檔案名稱都對應
 2. **CUDA 12.4 正確配置** - 不是 13.0
 3. **PyTorch 2.6.0+cu124** - 對應你的 pyproject.toml
@@ -2800,12 +2828,14 @@ python scripts/train.py
 6. **整合現有腳本** - 使用你已建立的 scripts/
 
 ### 📊 預期效能
+
 - 訓練速度: ~1.8 iter/s
 - 每 epoch: ~35 分鐘
 - 完整訓練: **~17.5 小時**
 - VRAM 使用: **~10.2 GB / 16 GB**
 
 ### 🎯 立即開始
+
 1. 升級 FAISS 到 GPU 版本
 2. 建立資料集索引
 3. 複製配置檔案與模型程式碼

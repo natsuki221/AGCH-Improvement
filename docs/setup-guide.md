@@ -6,6 +6,7 @@
 ---
 
 ## 目錄
+
 1. [系統需求檢查](#1-系統需求檢查)
 2. [安裝 uv](#2-安裝-uv)
 3. [專案初始化](#3-專案初始化)
@@ -19,6 +20,7 @@
 ## 1) 系統需求檢查
 
 ### 1.1 硬體需求
+
 在開始之前，請確認你的系統滿足以下需求：
 
 ```bash
@@ -28,7 +30,7 @@ nvidia-smi
 # 應該看到類似輸出：
 # +-----------------------------------------------------------------------------+
 # | NVIDIA-SMI 535.xx.xx    Driver Version: 535.xx.xx    CUDA Version: 12.2   |
-# |-------------------------------+----------------------+----------------------+
+# | -------------------------------+----------------------+----------------------+
 # | GPU  Name        Persistence-M| Bus-Id        Disp.A | Volatile Uncorr. ECC |
 # | Fan  Temp  Perf  Pwr:Usage/Cap|         Memory-Usage | GPU-Util  Compute M. |
 # |===============================+======================+======================|
@@ -37,6 +39,7 @@ nvidia-smi
 ```
 
 **最低需求**:
+
 - ✅ GPU: NVIDIA RTX 3090 或更高 (24GB VRAM)
 - ✅ CPU: 8 核心或更多
 - ✅ RAM: 32 GB 或更多
@@ -58,6 +61,7 @@ python3 --version
 ```
 
 **如果 Python 版本不符合**:
+
 ```bash
 # Ubuntu/Debian
 sudo apt update
@@ -74,7 +78,9 @@ pyenv global 3.11.7
 ## 2) 安裝 uv
 
 ### 2.1 什麼是 uv？
+
 `uv` 是由 Astral (Ruff 的開發者) 推出的超快速 Python 套件管理器：
+
 - ⚡ 比 pip 快 10-100 倍
 - 🔒 內建依賴解析與鎖定
 - 📦 自動管理虛擬環境
@@ -356,6 +362,7 @@ python -c "import faiss; print(f'FAISS: {faiss.__version__}')"
 ```
 
 **預期輸出**:
+
 ```
 PyTorch: 2.1.2+cu121, CUDA: True
 Transformers: 4.40.1
@@ -546,6 +553,7 @@ chmod +x scripts/download_coco.sh
 ```
 
 **預期目錄結構**:
+
 ```
 data/coco/
 ├── annotations/
@@ -1022,6 +1030,7 @@ python scripts/test_siglip2.py
 **問題**: `curl: command not found`
 
 **解決**:
+
 ```bash
 # Ubuntu/Debian
 sudo apt install curl
@@ -1035,6 +1044,7 @@ pip install uv
 **問題**: `torch.cuda.is_available()` 返回 `False`
 
 **檢查清單**:
+
 ```bash
 # 1. 檢查 NVIDIA 驅動
 nvidia-smi
@@ -1049,6 +1059,7 @@ uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu
 ### 7.3 資料集下載速度慢
 
 **解決方案 1: 使用鏡像站**
+
 ```bash
 # 編輯 scripts/download_coco.sh，改用 Azure 鏡像
 TRAIN_URL="http://msvocds.blob.core.windows.net/coco2014/train2014.zip"
@@ -1056,6 +1067,7 @@ VAL_URL="http://msvocds.blob.core.windows.net/coco2014/val2014.zip"
 ```
 
 **解決方案 2: 使用 aria2c 多線程下載**
+
 ```bash
 # 安裝 aria2c
 sudo apt install aria2
@@ -1065,17 +1077,20 @@ aria2c -x 16 -s 16 http://images.cocodataset.org/zips/train2014.zip
 ```
 
 **解決方案 3: 使用學術網路 VPN**
+
 - 許多大學提供 VPN，連線後下載速度會大幅提升
 
 ### 7.4 FAISS GPU 版本編譯失敗
 
 **方案 A: 使用 Conda 安裝**
+
 ```bash
 # 即使在 uv 環境中，也可以用 conda 裝 faiss
 conda install -c pytorch -c nvidia faiss-gpu=1.7.4
 ```
 
 **方案 B: 先用 CPU 版本**
+
 ```bash
 # 暫時使用 CPU 版本（速度較慢但能用）
 uv pip install faiss-cpu
@@ -1088,6 +1103,7 @@ uv pip install faiss-cpu
 **問題**: 處理資料集時系統記憶體不足
 
 **解決**:
+
 ```bash
 # 1. 關閉不必要的程式
 # 2. 使用 swap (臨時)
@@ -1104,6 +1120,7 @@ sudo swapon /swapfile
 **問題**: `error: Microsoft Visual C++ 14.0 is required`（Windows）
 
 **解決**:
+
 ```bash
 # 安裝 Visual Studio Build Tools
 # 或使用預編譯輪子
@@ -1111,6 +1128,7 @@ uv pip install pycocotools-windows
 ```
 
 **Linux**:
+
 ```bash
 # 安裝依賴
 sudo apt install python3-dev build-essential
@@ -1124,6 +1142,7 @@ uv pip install pycocotools
 環境設置完成後，可以開始：
 
 ### 8.1 建立配置檔案
+
 ```bash
 # 建立第一個實驗配置
 mkdir -p configs/experiments
@@ -1149,6 +1168,7 @@ YAML
 ```
 
 ### 8.2 開始開發
+
 ```bash
 # 建立主要程式碼檔案
 touch src/{__init__,model,dataset,train,evaluate}.py
@@ -1181,6 +1201,7 @@ tensorboard --logdir experiments/
 - ✅ 建立了完整的專案目錄結構
 
 **環境設置檢查表**:
+
 ```
 [O] uv 已安裝且可用
 [O] Python 3.10+ 虛擬環境已建立
@@ -1195,6 +1216,7 @@ tensorboard --logdir experiments/
 ```
 
 **下一步建議**:
+
 1. 📖 閱讀完整實驗計畫（`siglip2_multimodal_hash_knn_complete_plan.md`）
 2. 💻 實作資料載入器（`src/dataset.py`）
 3. 🏗️ 實作模型架構（`src/model.py`）
@@ -1202,6 +1224,7 @@ tensorboard --logdir experiments/
 
 祝實驗順利！有任何問題隨時詢問。
 PYTHON
+
 ```
 
 恭喜你完成環境設置！🎉
@@ -1224,7 +1247,7 @@ PYTHON
 ### 原始配置 vs 優化配置對比
 
 | 參數 | 原始 (24GB) | 優化 (16GB) | 說明 |
-|------|------------|------------|------|
+| ------ | ------------ | ------------ | ------ |
 | `batch_size` | 64 | **32** | 減半以節省記憶體 |
 | `max_num_patches` | 256 | **256** (保持) | 可嘗試但需監控 |
 | `mixed_precision` | 建議 | **必須** | FP16 可節省 40% VRAM |
@@ -1403,7 +1426,7 @@ knn:
 ### Base 配置下的記憶體分配
 
 | 組件 | 記憶體佔用 | 說明 |
-|------|-----------|------|
+| ------ | ----------- | ------ |
 | **SigLIP2-base (凍結)** | ~2.5 GB | 僅 forward pass |
 | **Fusion MLP** | ~0.3 GB | 可訓練 |
 | **Hash Layer** | ~0.1 GB | 可訓練 |
@@ -1418,7 +1441,7 @@ knn:
 ### ⚠️ 不要嘗試的配置
 
 | 配置 | 預估 VRAM | 結果 |
-|------|-----------|------|
+| ------ | ----------- | ------ |
 | batch_size=64 | ~16.5 GB | ❌ OOM (記憶體溢出) |
 | SigLIP2-large | ~18 GB | ❌ OOM |
 | max_patches=512 | ~14 GB | ⚠️ 可能 OOM |
@@ -1450,6 +1473,7 @@ print(f'VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB')
 ```
 
 **預期輸出**:
+
 ```
 PyTorch: 2.5.1+cu130
 CUDA available: True
@@ -1651,6 +1675,7 @@ if __name__ == "__main__":
 如果訓練時還是遇到 OOM，依序嘗試：
 
 ### 步驟 1: 降低 batch size
+
 ```yaml
 training:
   batch_size: 16  # 從 32 降到 16
@@ -1658,12 +1683,14 @@ training:
 ```
 
 ### 步驟 2: 降低解析度
+
 ```yaml
 model:
   max_num_patches: 196  # 從 256 降到 196
 ```
 
 ### 步驟 3: 啟用更激進的優化
+
 ```python
 # 在模型初始化時
 model.model.gradient_checkpointing_enable()
@@ -1673,6 +1700,7 @@ model = torch.compile(model, mode="reduce-overhead")
 ```
 
 ### 步驟 4: 清理不必要的張量
+
 ```python
 # 在訓練迴圈中
 del outputs, loss
@@ -1686,12 +1714,13 @@ torch.cuda.empty_cache()
 基於你的配置（RTX 5080 + 32 核心 CPU）：
 
 | 配置 | 速度 (iter/s) | 每 Epoch 時間 | 備註 |
-|------|--------------|--------------|------|
+| ------ | -------------- | -------------- | ------ |
 | batch=32, patches=256 | ~1.8 | ~35 分鐘 | 推薦配置 |
 | batch=16, patches=256 | ~2.5 | ~50 分鐘 | OOM 備案 |
 | batch=32, patches=196 | ~2.2 | ~30 分鐘 | 速度優先 |
 
 **完整訓練時間估算**:
+
 - 30 epochs × 35 分鐘 = **17.5 小時**
 - 建議分多次訓練（每次 10 epochs），定期檢查
 
