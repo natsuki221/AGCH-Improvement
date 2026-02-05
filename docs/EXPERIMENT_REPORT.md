@@ -181,5 +181,48 @@
 1.  **確認主因**: Hash Layer 造成了資訊的嚴重損失或梯度傳遞困難。
 2.  **Fusion 有效**: Hadamard + Magnitude Fusion (0.8323) 與 MLP Concat (0.8384) 表現相當，證實此種結構本身無害。
 3.  **下一步**: 
-    - 暫停 Hash 優化，先以 "No Hash" 架構進行其他改進 (如 Per-class 分析)。
-    - 或重新設計 Hash Layer (增加 bits 或改變約束 loss)。
+
+---
+
+### 實驗記錄 ID: 20260206-AB-3-BCE-ONLY
+
+**日期**: 2026-02-06  
+**類別**: Ablation Study (AB-3)  
+**變更摘要**: 保留 Hash Layer 架構但移除所有正則化 Loss (僅使用 BCE)。
+
+#### 1. 實驗配置
+- **模型**: SigLIP2 + Fusion + Hash Layer
+- **Loss**: **僅 BCE (Binary Cross Entropy)**
+    - Cosine Loss Weight: 0.0
+    - Hash Loss Weight: 0.0
+- **Hash Layer**: ✅ 啟用 (有 Tanh 瓶頸)
+
+#### 2. 實驗結果對比
+
+| 指標 | Baseline (MLP) | AB-1 (No Hash) | AB-3 (BCE Only) | AGCH (Full) |
+|:---:|:---:|:---:|:---:|:---:|
+| **mAP** | **0.8384** | **0.8323** | 0.7731 | 0.6787 |
+| **AUC** | 0.9836 | 0.9834 | 0.9729 | 0.9613 |
+| **F1** | 0.7701 | 0.7630 | 0.7030 | 0.5522 |
+| **Drop** | - | -0.6% | **-6.5%** | **-15.9%** |
+
+#### 3. 關鍵洞察 (Root Cause Analysis)
+
+透過 AB-1 與 AB-3 的結果，我們可以精確拆解效能損失的來源：
+
+1.  **Hash 瓶頸 (Bottleneck) 造成 ~6.5% 損失**：
+    - AB-1 (無 Hash) vs AB-3 (有 Hash 但無 Loss 約束)
+    - 僅僅是將特徵通過 Hash Layer (Tanh 壓縮)，mAP 即從 0.83 跌至 0.77。
+    - 這表示 64-bit 的資訊容量可能不足，或 Tanh 造成梯度消失。
+
+2.  **Hash/Cosine Loss 造成額外 ~9.4% 損失**：
+    - AB-3 (BCE Only) vs AGCH (Full Loss)
+    - 加上 `Cosine Loss` 與 `Hash Loss` 後，mAP 從 0.77 暴跌至 0.67。
+    - 這證明目前的 **Hash 正則化目標與分類目標存在嚴重衝突 (Competing Objectives)**，為了滿足 Hash 性質（正交、二值化）而犧牲了語義分類能力。
+
+#### 4. 下一步行動建議
+*   **立即停止** 當前的 Hash Loss 調優，因為它與主任務衝突。
+*   **Pivot 策略**：
+    1.  考慮移除 Hash Layer，專注於 AB-1 架構的優化 (Per-class, Ensemble)。
+    2.  若必須保留 Hash (為了檢索效率)，需改用 **Product Quantization (PQ)** 或放寬 Hash 約束權重 (e.g., hash_weight 0.1 -> 0.001)。
+

@@ -42,4 +42,4 @@ def analyze_checkpoint(path):
 
 
 if __name__ == "__main__":
-    analyze_checkpoint("outputs/checkpoints/ablation_no_hash/best_model.pth")
+    analyze_checkpoint("outputs/checkpoints/ablation_bce_only/best_model.pth")
