@@ -1,0 +1,17 @@
+# configs/experiments/ablation_hash_64_rerun.yaml
+# AB-4: Hash Bits = 64 重跑 (對齊 num_epochs=50)
+
+defaults:
+  - cv_experiment
+
+model:
+  hash:
+    bits: 64
+
+experiment:
+  name: "ablation_hash_64_rerun"
+  tags: ["ablation", "hash-bits", "hash-64", "rerun"]
+
+training:
+  num_epochs: 50
+  early_stopping_patience: 5
