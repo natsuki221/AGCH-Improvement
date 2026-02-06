@@ -1,0 +1,16 @@
+# configs/experiments/ablation_no_decompose.yaml
+# AB-2: 不使用 Direction/Magnitude 分解，直接 Concat 原始 Embeddings
+
+defaults:
+  - cv_experiment
+
+model:
+  skip_decompose: true
+
+experiment:
+  name: "ablation_no_decompose"
+  tags: ["ablation", "no-decompose", "concat-fusion"]
+
+training:
+  num_epochs: 50
+  early_stopping_patience: 5

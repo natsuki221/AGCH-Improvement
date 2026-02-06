@@ -1,0 +1,18 @@
+# configs/experiments/baseline_with_hash.yaml
+# AB-5: Baseline MLP + Hash (用於公平對比 Hash 影響)
+
+defaults:
+  - cv_experiment
+
+model:
+  type: "baseline_hash"  # 新增欄位，用於 train_baseline.py 識別
+  hash:
+    bits: ${hash_bits}  # 支援 multirun
+
+experiment:
+  name: "baseline_with_hash_${hash_bits}"
+  tags: ["baseline", "hash"]
+
+training:
+  num_epochs: 50
+  early_stopping_patience: 5

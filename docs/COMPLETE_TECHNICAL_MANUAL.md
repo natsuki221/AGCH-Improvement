@@ -1,7 +1,7 @@
 # 多模態圖文多標籤分類完整實驗計畫 (SigLIP 2 + 方向/幅度分解 + Hadamard 融合 + Hash + KNN)
 
-> **版本**: v3.0 (統整版 - 整合 v2.2 + v2.3)  
-> **日期**: 2026-02-02  
+> **版本**: v3.3 (消融實驗二期 - Hash Bits 與分解模組優化)  
+> **日期**: 2026-02-06  
 > **專案**: AGCH-Improvement  
 > **硬體**: RTX 5080 16GB | 32-core CPU | 42GB RAM | **CUDA 12.8**  
 > **環境**: Python 3.11+ | PyTorch 2.6.0+cu128 | uv 套件管理  
@@ -24,6 +24,13 @@
 - ✅ **5-Fold 指標補完**: 手動提取並於 `EXPERIMENT_REPORT.md` 補全 5 折交叉驗證的 AUC/F1 等關鍵指標
 - ✅ **新增實作計畫**: 建立 `docs/IMPROVEMENT_IMPLEMENTATION_PLAN.md` 作為後續分析與優化導航
 - ✅ **專案清理**: 將舊版計畫書移至 `docs/old/`，保持文檔整潔
+
+### v3.3 (2026-02-06) - 消融實驗二期
+
+- ✅ **Hash Bits 深度分析**: 完成 AB-4 實驗，確認 Hash Layer 符合 Scaling Law (256-bit 最佳)
+- ✅ **64-bit 異常修正**: 發現原先 64-bit 效能低落主因為訓練 Epoch 不足，重跑後已恢復正常
+- ✅ **模組化消融**: 新增 `skip_decompose` 與 `ConcatFusion` 支援 AB-2 實驗
+- ✅ **Baseline 擴充**: 新增 `SigLIP2MLPHash` 用於 AB-5 公平對比
 
 ### v3.2 (2026-02-04) - 模組重構版
 
@@ -113,9 +120,15 @@
 AGCH-Improvement/
 ├── configs/                    # ✅ 實驗與硬體配置
 │   ├── experiments/           # 實驗參數
-│   │   ├── ablation_fusion.yaml
-│   │   ├── ablation_hash.yaml
+│   │   ├── ablation_bce_only.yaml # AB-3: 僅 BCE Loss
+│   │   ├── ablation_no_hash.yaml  # AB-1: 無 Hash Layer
+│   │   ├── ablation_no_decompose.yaml # AB-2: 無分解模組
+│   │   ├── ablation_hash_32.yaml  # AB-4: 32-bit Hash
+│   │   ├── ablation_hash_64_rerun.yaml # AB-4: 64-bit Hash (重跑版)
+│   │   ├── ablation_hash_128.yaml # AB-4: 128-bit Hash
+│   │   ├── ablation_hash_256.yaml # AB-4: 256-bit Hash
 │   │   ├── baseline.yaml      # Baseline 實驗配置（改進版）
+│   │   ├── baseline_with_hash.yaml # AB-5: Baseline + Hash
 │   │   ├── siglip2_mlp_baseline.yaml  # 純 MLP Baseline 配置
 │   │   ├── cv_experiment.yaml # 5-Fold CV 實驗配置
 │   │   └── grid_search.yaml
@@ -169,6 +182,7 @@ AGCH-Improvement/
 │   └── siglip2_multimodal_hash/
 │       ├── __init__.py
 │       ├── baseline_model.py # SigLIP2-MLP Baseline 模型
+│       ├── baseline_with_hash.py # SigLIP2-MLP+Hash 模型 (AB-5)
 │       ├── dataset.py        # 資料載入器
 │       ├── knn.py            # KNN 檢索模組
 │       ├── losses.py         # 損失函數 (BCE+Cos+Hash)
@@ -3617,3 +3631,22 @@ python scripts/train.py --config-name experiments/ablation_bce_only
 | **移除分解後效能提升** | 分解策略不適合 SigLIP2 | 回歸標準 Embedding 拼接策略 |
 | **僅用 BCE 效果最佳** | 多工 Loss 導致優化衝突 | 簡化 Loss Function，專注於分類準確度 |
 | **增加 Bits 顯著提升 mAP** | 目前 64 bits 容量不足 | 增加 Hash Bits 至 128 或 256 |
+
+### 17.5 實驗結果與分析 (Phase 2 更新)
+
+#### 17.5.1 AB-4: Hash Bits 深度分析
+
+我們測試了 32, 64, 128, 256 bits 四種設定。原先 64-bit 因訓練不足 (20 epochs) 表現低落，經重跑實驗 (50 epochs) 後已校正。
+
+| Bits | mAP | 說明 |
+| :---: | :---: | :--- |
+| **32** | 0.7495 | 資訊損失最大，但仍優於預期 |
+| **64** | 0.7751 | (重跑後) 符合 Scaling 趨勢 |
+| **128** | 0.7899 | 顯著提升，性價比高 |
+| **256** | **0.8045** | 最佳表現，最接近 No Hash (0.8323) |
+
+**關鍵發現**:
+
+1. **Scaling Law 成立**: mAP 隨 Hash Bits 增加而穩定上升。
+2. **Gap 仍存在**: 即使 256-bits，仍有 ~2.7% 的效能落後於 No Hash 版本。這意味著 Hash 本身（Tanh 二值化近似）無可避免地帶來資訊損失。
+3. **決策建議**: 若必須保留 Hash 檢索功能，建議採用 **256-bit** 以換取最佳精度。

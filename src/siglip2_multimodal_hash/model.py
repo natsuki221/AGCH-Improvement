@@ -27,6 +27,45 @@ class DirectionMagnitudeDecomposer(nn.Module):
         return direction, magnitude
 
 
+class ConcatFusion(nn.Module):
+    """直接 concat 融合（用於 AB-2 消融實驗）"""
+
+    def __init__(
+        self, embed_dim: int, mlp_dims: list[int], dropout: float = 0.1, activation: str = "relu"
+    ):
+        super().__init__()
+
+        # Input: [v_img, v_txt]
+        input_dim = embed_dim * 2
+
+        layers = []
+        prev_dim = input_dim
+
+        for hidden_dim in mlp_dims:
+            layers.extend(
+                [
+                    nn.Linear(prev_dim, hidden_dim),
+                    nn.ReLU() if activation == "relu" else nn.GELU(),
+                    nn.Dropout(dropout),
+                ]
+            )
+            prev_dim = hidden_dim
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(self, v_img: torch.Tensor, v_txt: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            v_img: (B, D) raw image embedding
+            v_txt: (B, D) raw text embedding
+        Returns:
+            z: (B, mlp_dims[-1]) fused embedding
+        """
+        x = torch.cat([v_img, v_txt], dim=1)
+        z = self.mlp(x)
+        return z
+
+
 class HadamardFusion(nn.Module):
     """Hadamard 乘積融合模組"""
 
@@ -137,16 +176,26 @@ class MultimodalHashKNN(nn.Module):
             self.embed_dim = 768  # fallback for siglip2-base
         print(f"  Embedding dim: {self.embed_dim}")
 
-        # Decomposer
-        self.decomposer = DirectionMagnitudeDecomposer(eps=config.decomposer.eps)
+        # Decomposer & Fusion logic
+        self.skip_decompose = config.get("skip_decompose", False)
 
-        # Fusion
-        self.fusion = HadamardFusion(
-            embed_dim=self.embed_dim,
-            mlp_dims=config.fusion.mlp_dims,
-            dropout=config.fusion.dropout,
-            activation=config.fusion.activation,
-        )
+        if self.skip_decompose:
+            print("  [Model] skip_decompose=True: Using ConcatFusion")
+            self.decomposer = nn.Identity()  # Not used in forward, but kept for simplicity
+            self.fusion = ConcatFusion(
+                embed_dim=self.embed_dim,
+                mlp_dims=config.fusion.mlp_dims,
+                dropout=config.fusion.dropout,
+                activation=config.fusion.activation,
+            )
+        else:
+            self.decomposer = DirectionMagnitudeDecomposer(eps=config.decomposer.eps)
+            self.fusion = HadamardFusion(
+                embed_dim=self.embed_dim,
+                mlp_dims=config.fusion.mlp_dims,
+                dropout=config.fusion.dropout,
+                activation=config.fusion.activation,
+            )
 
         # Hash layer
         skip_hash = config.hash.get("skip_hash", False)
@@ -190,12 +239,20 @@ class MultimodalHashKNN(nn.Module):
         v_img = outputs.image_embeds  # (B, D)
         v_txt = outputs.text_embeds  # (B, D)
 
-        # Decompose
-        d_img, m_img = self.decomposer(v_img)
-        d_txt, m_txt = self.decomposer(v_txt)
+        # Decompose & Fuse
+        if self.skip_decompose:
+            # 直接融合 raw embeddings
+            z = self.fusion(v_img, v_txt)
 
-        # Fuse
-        z = self.fusion(d_img, d_txt, m_img, m_txt)
+            # 為了相容 losses.py 中的 Cosine Loss，將原始 embedding 作為方向傳遞
+            # 並將幅度設為 1 (log(1)=0)
+            d_img, d_txt = v_img, v_txt
+            m_img = m_txt = torch.zeros(v_img.size(0), 1, device=v_img.device)
+        else:
+            # 原有的分解流程
+            d_img, m_img = self.decomposer(v_img)
+            d_txt, m_txt = self.decomposer(v_txt)
+            z = self.fusion(d_img, d_txt, m_img, m_txt)
 
         # Hash
         h = self.hash_layer(z)
@@ -231,8 +288,11 @@ class MultimodalHashKNN(nn.Module):
         )
         v_img = outputs.image_embeds
         v_txt = outputs.text_embeds
-        d_img, m_img = self.decomposer(v_img)
-        d_txt, m_txt = self.decomposer(v_txt)
-        z = self.fusion(d_img, d_txt, m_img, m_txt)
+        if self.skip_decompose:
+            z = self.fusion(v_img, v_txt)
+        else:
+            d_img, m_img = self.decomposer(v_img)
+            d_txt, m_txt = self.decomposer(v_txt)
+            z = self.fusion(d_img, d_txt, m_img, m_txt)
         h = self.hash_layer(z)
         return h
