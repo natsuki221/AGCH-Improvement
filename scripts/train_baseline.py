@@ -33,6 +33,7 @@ from sklearn.metrics import (
 
 # 本專案模組
 from siglip2_multimodal_hash.baseline_model import SigLIP2MLPBaseline
+from siglip2_multimodal_hash.baseline_with_hash import SigLIP2MLPHash
 from siglip2_multimodal_hash.dataset import create_dataloader
 from siglip2_multimodal_hash.utils import set_seed, get_gpu_memory_info
 
@@ -54,10 +55,40 @@ def compute_baseline_loss(outputs, labels, config):
     # BCE Loss（主要損失）
     loss_bce = F.binary_cross_entropy_with_logits(logits, labels)
 
-    return {
-        "total": loss_bce,
+    loss_dict = {
         "bce": loss_bce,
     }
+
+    # 如果有 Hash 輸出，計算 Hash Regularization Loss
+    if "h" in outputs:
+        # 簡單的 Hash 三項損失 (借用自 losses.py 的邏輯簡化版)
+        h = outputs["h"]
+
+        # 1. Quantization
+        loss_quant = torch.mean((torch.abs(h) - 1) ** 2)
+
+        # 2. Balance
+        bit_mean = torch.mean(h, dim=0)
+        loss_balance = torch.mean(bit_mean**2)
+
+        # 3. Decorrelation
+        h_centered = h - torch.mean(h, dim=0, keepdim=True)
+        cov = (h_centered.T @ h_centered) / h.size(0)
+        loss_decorr = (torch.sum(cov**2) - torch.trace(cov**2)) / (h.size(1) ** 2)
+
+        # 讀取參數 (如果沒有則用預設值)
+        lambda_balance = config.get("hash_reg", {}).get("lambda_balance", 0.1)
+        lambda_decorr = config.get("hash_reg", {}).get("lambda_decorr", 0.01)
+        hash_weight = config.get("hash_weight", 0.1)
+
+        loss_hash = loss_quant + lambda_balance * loss_balance + lambda_decorr * loss_decorr
+
+        loss_dict["hash"] = loss_hash
+        loss_dict["total"] = loss_bce + hash_weight * loss_hash
+    else:
+        loss_dict["total"] = loss_bce
+
+    return loss_dict
 
 
 def train_epoch(model, train_loader, optimizer, scheduler, scaler, config):
@@ -297,8 +328,13 @@ def main(raw_config: DictConfig):
         use_wandb = False
 
     # 建立模型
-    print("\n📦 建立 Baseline 模型...")
-    model = SigLIP2MLPBaseline(config.model).cuda()
+    model_type = config.model.get("type", "baseline")
+    print(f"\n📦 建立模型 (Type: {model_type})...")
+
+    if model_type == "baseline_hash":
+        model = SigLIP2MLPHash(config.model).cuda()
+    else:
+        model = SigLIP2MLPBaseline(config.model).cuda()
 
     # 顯示記憶體資訊
     mem_info = get_gpu_memory_info()
