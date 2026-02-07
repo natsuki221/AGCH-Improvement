@@ -263,5 +263,89 @@
    - `64 -> 128`: +1.48%
    - `128 -> 256`: +1.46%
 3. **結論**：Hash Layer 的資訊損失與其容量（Bits）呈負相關。256-bit 是目前最佳選擇，但仍有約 2.7% 的 gap (vs No Hash)。
-4. **128-bit (0.7899) > 32-bit**：隨著 Hash 容量增加，資訊保留能力提升，效能顯著回升，逼近 No Hash (0.8323) 的水準。
-5. **推論**：64-bit 可能是特定的局部極小值 (或者超參數不適配)。增加 Bits 數似乎是正確方向。建議繼續測試 256-bit。
+
+---
+
+### 實驗記錄 ID: 20260207-AB-2-NO-DECOMPOSE
+
+**日期**: 2026-02-07  
+**類別**: Ablation Study (AB-2)  
+**變更摘要**: 驗證 Direction/Magnitude Decomposition 模組的有效性。
+
+#### 1. 實驗配置
+
+- **對照組**: AB-4 Hash-64 (mAP 0.7751)
+- **實驗組**: AB-2 No Decompose (mAP 0.7776)
+- **變數**: `skip_decompose: True`
+- **Hash Bits**: 兩者皆為 64-bits
+- **Loss**: 兩者皆啟用 Hash Loss/Cosine Loss (但在實驗組中 Cosine Loss 退化為原始 embedding 相似度)
+
+#### 2. 實驗結果
+
+| 實驗 | mAP | AUC | Epoch | 差異 |
+| :---: | :---: | :---: | :---: | :---: |
+| AB-4 (有 Decompose) | 0.7751 | 0.9731 | 49 | 基準 |
+| **AB-2 (無 Decompose)** | **0.7776** | **0.9735** | 49 | **+0.25% (微幅提升)** |
+
+#### 3. 分析與結論
+
+1. **分解模組無效 (Neutral Impact)**：
+   移除分解模組後，效能幾乎沒有變化 (0.7751 vs 0.7776)，甚至略微提升。這表示將 Embeddings 強制拆解為方向與長度，對於分類任務**沒有提供額外的資訊增益**。
+
+2. **奧卡姆剃刀 (Occam's Razor)**：
+   既然分解模組不帶來準確度提升，反而增加了計算複雜度（雖然很小）與程式碼護維護成本，建議在最終架構中**移除此模組**，改採直接 Concat 策略。
+
+3. **下一步**：
+   專注於 **AB-5 (Baseline + Hash)**，這將是最後的拼圖——確認 Baseline MLP (0.8384) 加上 Hash Layer 後，效能會掉到多少。如果掉到 0.77 左右，那就證明 Hash Layer 本身（及其 Loss）就是造成 0.83 -> 0.77 差距的唯一原因。
+
+---
+
+### 實驗記錄 ID: 20260208-AB-5-BASELINE-HASH
+
+**日期**: 2026-02-08  
+**類別**: Ablation Study (AB-5)  
+**變更摘要**: 在最強 Baseline 架構上僅疊加 Hash Layer，以隔離 Hash 造成的效能損失。
+
+#### 1. 實驗配置
+
+- **Baseline**: SigLIP2-MLP (mAP 0.8384)
+- **Hash Layer**: 64-bits
+- **Loss**: BCE + Hash Regularization (無 Cosine Loss)
+- **變數**: Hash Layer 的有無
+- **目的**: 驗證 "Hash Bottleneck" 假說。
+
+#### 2. 實驗結果對比
+
+| 模型架構 | mAP | 說明 |
+| :--- | :---: | :--- |
+| **Baseline (No Hash)** | **0.8384** | 上限 (Upper Bound) |
+| **AB-5 (Baseline + Hash)** | **0.7903** | **Drop: -4.81%** (主要損失來源) |
+| **AB-2 (Full - Decompose)** | 0.7776 | Drop: -1.27% (相對 AB-5) |
+| **AGCH (Full)** | 0.7731 | 原始架構 |
+
+#### 3. 終極歸因分析 (Final Attribution Analysis)
+
+透過 Phase 2 的一系列消融實驗，我們終於可以精確地繪製出效能損失的瀑布圖 (Waterfall Chart)：
+
+1. **Hash Layer 引入 (0.8384 -> 0.7903)**：
+   - **損失**: **-4.81%** (主要兇手)
+   - **原因**: 將高維浮點數特徵壓縮成 64-bit binary codes (Tanh 瓶頸) 造成了嚴重的資訊流失。這是為了「檢索效率」所付出的必然代價。
+
+2. **複雜架構引入 (0.7903 -> 0.7731)**：
+   - **損失**: **-1.72%** (次要兇手)
+   - **原因**: Direction/Magnitude 分解、Hadamard Fusion 以及 Cosine Loss 的加入，並未帶來預期的特徵增強，反而引入了些許雜訊或優化困難。
+
+#### 4. 戰略決策 (Strategic Pivot)
+
+基於數據，我們有兩條路：
+
+1. **追求極致效能 (SOTA)**：
+   - **放棄 Hash 與 KNN**。
+   - 回歸 **SigLIP2-MLP Baseline** 架構。
+   - 優化方向：Label Smoothing, CutMix, TTA, Ensemble。
+
+2. **追求檢索效率 (Efficiency)**：
+   - **保留 AB-5 架構 (Baseline + Hash)**，移除多餘的 Decompose/Fusion 模組。
+   - **提升 Hash Bits**: 根據 AB-4 結果，將 Bits 提升至 **256** 可望將 mAP 拉回 **0.8045** 以上 (Gap 縮小至 <3%)。
+
+**建議**: 採用 **方案 2 (Efficiency)** 的改良版 —— **SigLIP2 + MLP + 256-bit Hash**。這是在效能與檢索能力之間取得的最佳平衡點。

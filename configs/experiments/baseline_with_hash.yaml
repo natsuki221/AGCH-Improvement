@@ -3,14 +3,15 @@
 
 defaults:
   - cv_experiment
+  - _self_
 
 model:
-  type: "baseline_hash"  # 新增欄位，用於 train_baseline.py 識別
+  type: "baseline_hash"
   hash:
-    bits: ${hash_bits}  # 支援 multirun
+    bits: 64  # Default value
 
 experiment:
-  name: "baseline_with_hash_${hash_bits}"
+  name: "baseline_with_hash_64"
   tags: ["baseline", "hash"]
 
 training:
